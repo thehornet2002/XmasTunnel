@@ -69,6 +69,16 @@ class CapabilityReport:
         }
 
 
+_GLOBAL_CAPABILITY: Optional["CapabilityReport"] = None
+
+
+def get_capability_report() -> "CapabilityReport":
+    global _GLOBAL_CAPABILITY
+    if _GLOBAL_CAPABILITY is None:
+        _GLOBAL_CAPABILITY = CapabilityReport()
+    return _GLOBAL_CAPABILITY
+
+
 class RawPacketEngine:
     """
     Engine for crafting, testing, transmitting, and inspecting raw TCP packets
@@ -76,7 +86,7 @@ class RawPacketEngine:
     """
 
     def __init__(self, fallback_to_loopback: bool = True):
-        self.capability = CapabilityReport()
+        self.capability = get_capability_report()
         self.fallback_to_loopback = fallback_to_loopback
         self.captured_packets: List[RawTCPPacket] = []
 

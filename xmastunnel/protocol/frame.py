@@ -118,40 +118,36 @@ class FrameParser:
     def next_frame(self) -> Optional[Frame]:
         """Extract the next complete frame, or None if more data is needed."""
         while len(self._buffer) >= HEADER_SIZE:
-            # Find magic in buffer
+            # Fast path: buffer already aligned with MAGIC
+            if self._buffer[:2] == MAGIC:
+                header_bytes = bytes(self._buffer[:HEADER_SIZE])
+                try:
+                    version, frame_type, session_id, seq, payload_len = Frame.unpack_header(header_bytes)
+                except ProtocolError:
+                    del self._buffer[0]
+                    continue
+
+                total_frame_len = HEADER_SIZE + payload_len
+                if len(self._buffer) < total_frame_len:
+                    return None  # Wait for remaining payload
+
+                payload = bytes(self._buffer[HEADER_SIZE:total_frame_len])
+                del self._buffer[:total_frame_len]
+
+                return Frame(
+                    frame_type=frame_type,
+                    session_id=session_id,
+                    seq=seq,
+                    payload=payload,
+                    version=version,
+                )
+
+            # Slow path: find next MAGIC in buffer and discard stray bytes
             idx = self._buffer.find(MAGIC)
             if idx == -1:
-                # No magic in buffer; keep only the last byte in case MAGIC is split
                 del self._buffer[:-1]
                 return None
-            elif idx > 0:
-                # Discard non-frame bytes before MAGIC
-                del self._buffer[:idx]
-                if len(self._buffer) < HEADER_SIZE:
-                    return None
-
-            header_bytes = bytes(self._buffer[:HEADER_SIZE])
-            try:
-                version, frame_type, session_id, seq, payload_len = Frame.unpack_header(header_bytes)
-            except ProtocolError:
-                # Corrupted header, skip one byte and re-scan
-                del self._buffer[0]
-                continue
-
-            total_frame_len = HEADER_SIZE + payload_len
-            if len(self._buffer) < total_frame_len:
-                return None  # Wait for remaining payload
-
-            payload = bytes(self._buffer[HEADER_SIZE:total_frame_len])
-            del self._buffer[:total_frame_len]
-
-            return Frame(
-                frame_type=frame_type,
-                session_id=session_id,
-                seq=seq,
-                payload=payload,
-                version=version,
-            )
+            del self._buffer[:idx]
 
         return None
 

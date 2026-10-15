@@ -66,6 +66,10 @@ class SOCKS5ProxyServer:
     def _handle_client(self, client_sock: socket.socket) -> None:
         stream_id = 0
         try:
+            try:
+                client_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except OSError:
+                pass
             client_sock.settimeout(15.0)
 
             # 1. SOCKS5 Greeting & Method Negotiation

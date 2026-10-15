@@ -257,6 +257,10 @@ class TunnelServer:
                         self.logger.info(f"[Session 0x{session.session_id:016X}] SOCKS5 Stream #{stream_id} -> {dst_host}:{dst_port}")
                         try:
                             out_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            try:
+                                out_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                            except OSError:
+                                pass
                             out_sock.settimeout(10.0)
                             out_sock.connect((dst_host, dst_port))
                             out_sock.settimeout(None)

@@ -144,7 +144,7 @@ class TCPConnection:
                 continue
 
             try:
-                chunk = self.sock.recv(4096)
+                chunk = self.sock.recv(65536)
                 if not chunk:
                     # EOF: connection closed by peer
                     self._closed = True
