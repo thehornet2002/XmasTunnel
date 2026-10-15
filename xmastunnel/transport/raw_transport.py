@@ -157,7 +157,7 @@ class RawTunnelConnection:
         try:
             return self._frame_queue.get(timeout=eff_timeout)
         except queue.Empty:
-            return None
+            raise ConnectionTimeoutError("Raw packet recv timed out")
 
     def close(self) -> None:
         if not self._closed:

@@ -288,7 +288,7 @@ def cmd_client(args: argparse.Namespace) -> None:
             print(f" [+] Configure browser / Telegram / apps to SOCKS5 {args.socks_host}:{socks_port}")
             print("=" * 68)
             print("[*] Tunnel active. Press Ctrl+C to stop.\n")
-            while client.is_connected:
+            while client.is_connected and not getattr(client.conn, "_closed", False):
                 time.sleep(1.0)
     except KeyboardInterrupt:
         print("\n[*] Exiting...")

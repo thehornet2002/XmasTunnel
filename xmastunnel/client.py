@@ -11,6 +11,7 @@ from .session.session import TunnelSession, SessionSecurityError
 from .transport.tcp_transport import (
     TCPConnection,
     TransportError,
+    ConnectionTimeoutError,
     connect_tcp,
 )
 
@@ -241,11 +242,25 @@ class TunnelClient:
         self._socks_rx_thread.start()
 
     def _socks_rx_loop(self) -> None:
+        last_ping = time.time()
         try:
-            while self.is_connected:
-                frame = self.conn.recv_frame(timeout=60.0)
+            while self.is_connected and not getattr(self.conn, "_closed", False):
+                try:
+                    frame = self.conn.recv_frame(timeout=5.0)
+                except ConnectionTimeoutError:
+                    now = time.time()
+                    if now - last_ping >= 15.0 and self.is_connected:
+                        last_ping = now
+                        try:
+                            ping_f = self.session.encrypt_frame(FrameType.PING, b"PING")
+                            self.conn.send_frame(ping_f)
+                        except Exception:
+                            pass
+                    continue
+
                 if frame is None:
                     break
+
                 if frame.frame_type == FrameType.STREAM_DATA:
                     plaintext = self.session.decrypt_frame(frame)
                     if len(plaintext) > 4:
@@ -263,6 +278,8 @@ class TunnelClient:
                     self.session.decrypt_frame(frame)
                     pong = self.session.encrypt_frame(FrameType.PONG, b"PONG")
                     self.conn.send_frame(pong)
+                elif frame.frame_type == FrameType.PONG:
+                    self.session.decrypt_frame(frame)
                 elif frame.frame_type == FrameType.TEARDOWN:
                     break
         except Exception as e:

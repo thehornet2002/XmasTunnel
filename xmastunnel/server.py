@@ -313,7 +313,13 @@ class TunnelServer:
 
             # 5. Established session loop
             while self._running and session.is_established:
-                frame = conn.recv_frame(timeout=self.config.idle_timeout)
+                try:
+                    frame = conn.recv_frame(timeout=30.0)
+                except ConnectionTimeoutError:
+                    if time.time() - session.last_active_at > self.config.idle_timeout:
+                        self.logger.info(f"Session 0x{session.session_id:016X} idle timeout reached")
+                        break
+                    continue
                 if frame is None:
                     self.logger.info(f"Client {conn.peer_address} disconnected cleanly")
                     break
