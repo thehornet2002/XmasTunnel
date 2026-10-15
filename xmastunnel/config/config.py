@@ -14,6 +14,7 @@ class ServerConfig:
     rate_limit_bytes_per_sec: int = 0  # 0 = unlimited
     server_flags: str = "SYN_ACK"      # Flags for packets emitted by server
     client_flags: str = "XMAS_TREE"    # Flags expected from client
+    raw_mode: bool = False             # Raw packet tunnel (bypasses OS TCP stack)
     log_file: Optional[str] = None
     verbose: bool = False
 
@@ -30,6 +31,7 @@ class ClientConfig:
     keepalive_interval: float = 30.0
     client_flags: str = "XMAS_TREE"    # Flags emitted by client
     server_flags: str = "SYN_ACK"      # Expected server flags
+    raw_mode: bool = False             # Raw packet tunnel (bypasses OS TCP stack)
     log_file: Optional[str] = None
     verbose: bool = False
 
@@ -70,6 +72,7 @@ def encode_client_token(
     server_flags: str = "SYN_ACK",
     client_ip: str = "",
     flags: Optional[str] = None,
+    raw_mode: bool = False,
 ) -> str:
     """Encodes server connection parameters and directional flags into a portable xmas:// token."""
     import base64
@@ -82,6 +85,7 @@ def encode_client_token(
         "server_flags": server_flags,
         "flags": c_flags,  # backward compatibility
         "client_ip": client_ip,
+        "raw": raw_mode,
     }
     raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     b64 = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
@@ -103,4 +107,6 @@ def decode_client_token(token: str) -> dict:
         data["client_flags"] = data["flags"]
     if "server_flags" not in data:
         data["server_flags"] = "SYN_ACK"
+    if "raw" not in data:
+        data["raw"] = False
     return data

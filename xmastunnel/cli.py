@@ -105,17 +105,24 @@ def cmd_server(args: argparse.Namespace) -> None:
         else:
             client_flags = "XMAS_TREE"
 
-        # 4. Key
+        # 4. Transmission Mode
+        print("\n4. Select Transmission Engine:")
+        print("   [1] Raw Xmas Packet Tunnel (Every packet has your exact custom flags in Wireshark) [Default]")
+        print("   [2] Standard TCP Stream (Kernel controls flags)")
+        m_choice = input("Select Engine [1-2, default: 1]: ").strip()
+        raw_mode = False if m_choice == "2" else True
+
+        # 5. Key
         psk = args.key or generate_server_psk()
 
-        # 5. Public IP
+        # 6. Public IP
         print("\n[*] Detecting Server Public IP...")
         server_ip = get_public_ip()
         ip_override = input(f"Detected IP: {server_ip}. Press Enter to keep or type IP: ").strip()
         if ip_override:
             server_ip = ip_override
 
-        # 6. Generate configuration token
+        # 7. Generate configuration token
         token = encode_client_token(
             server_ip=server_ip,
             port=port,
@@ -123,6 +130,7 @@ def cmd_server(args: argparse.Namespace) -> None:
             client_flags=client_flags,
             server_flags=server_flags,
             client_ip=client_ip,
+            raw_mode=raw_mode,
         )
 
         print("\n" + "=" * 72)
@@ -131,6 +139,7 @@ def cmd_server(args: argparse.Namespace) -> None:
         print(f" Server IP:        {server_ip}")
         print(f" Port:             {port}")
         print(f" Shared Key (PSK): {psk}")
+        print(f" Engine Mode:      {'Raw Packet Tunnel (Custom Flags in Wireshark)' if raw_mode else 'Standard TCP'}")
         print(f" Server TX Flags:  {server_flags}")
         print(f" Client TX Flags:  {client_flags}")
         print(f" Allowed Clt IP:   {client_ip}")
@@ -151,16 +160,20 @@ def cmd_server(args: argparse.Namespace) -> None:
             psk=psk,
             server_flags=server_flags,
             client_flags=client_flags,
+            raw_mode=raw_mode,
             rate_limit_bytes_per_sec=args.rate_limit,
             verbose=args.verbose,
         )
     elif args.config:
         config = load_server_config(args.config)
+        if getattr(args, "raw", False):
+            config.raw_mode = True
     else:
         config = ServerConfig(
             host=args.host,
             port=args.port,
             psk=args.key,
+            raw_mode=getattr(args, "raw", False),
             rate_limit_bytes_per_sec=args.rate_limit,
             verbose=args.verbose,
         )
@@ -176,6 +189,7 @@ def cmd_client(args: argparse.Namespace) -> None:
     psk = args.key
     client_flags = "NONE"
     server_flags = "NONE"
+    raw_mode = getattr(args, "raw", False)
 
     # 1. Token passed via argument
     if getattr(args, "token", None):
@@ -185,6 +199,8 @@ def cmd_client(args: argparse.Namespace) -> None:
         psk = cfg_data.get("psk", psk)
         client_flags = cfg_data.get("client_flags", cfg_data.get("flags", "NONE"))
         server_flags = cfg_data.get("server_flags", "NONE")
+        if "raw" in cfg_data:
+            raw_mode = cfg_data["raw"]
 
     # 2. Interactive token prompt if key not given
     elif not psk and not args.config and sys.stdin.isatty():
@@ -199,11 +215,15 @@ def cmd_client(args: argparse.Namespace) -> None:
             psk = cfg_data.get("psk", "")
             client_flags = cfg_data.get("client_flags", cfg_data.get("flags", "NONE"))
             server_flags = cfg_data.get("server_flags", "NONE")
+            if "raw" in cfg_data:
+                raw_mode = cfg_data["raw"]
         else:
             psk = token_input
 
     if args.config:
         config = load_client_config(args.config)
+        if raw_mode:
+            config.raw_mode = True
     else:
         if not psk:
             print("[!] Error: Pre-shared key or --token is required.", file=sys.stderr)
@@ -214,6 +234,7 @@ def cmd_client(args: argparse.Namespace) -> None:
             psk=psk,
             client_flags=client_flags,
             server_flags=server_flags,
+            raw_mode=raw_mode,
             rate_limit_bytes_per_sec=args.rate_limit,
             verbose=args.verbose,
         )
@@ -350,6 +371,7 @@ def main() -> None:
     p_srv.add_argument("-p", "--port", type=int, default=8443, help="Listen port (default: 8443)")
     p_srv.add_argument("--key", default=None, help="Pre-shared key (generated automatically if omitted)")
     p_srv.add_argument("--rate-limit", type=int, default=0, help="Rate limit bytes/sec (0 = unlimited)")
+    p_srv.add_argument("--raw", action="store_true", help="Run in Raw Packet Tunnel mode (bypasses OS TCP stack)")
     p_srv.add_argument("-c", "--config", help="Path to server JSON config file")
     p_srv.add_argument("-v", "--verbose", action="store_true", help="Verbose debug logging")
     p_srv.set_defaults(func=cmd_server)
@@ -366,6 +388,7 @@ def main() -> None:
     p_cli.add_argument("--ping", type=int, metavar="COUNT", help="Send N ping frames and report RTT")
     p_cli.add_argument("--xmas-probe", action="store_true", help="Send Xmas Tree probe packet (FIN|PSH|URG) before connecting")
     p_cli.add_argument("--rate-limit", type=int, default=0, help="Rate limit bytes/sec (0 = unlimited)")
+    p_cli.add_argument("--raw", action="store_true", help="Run in Raw Packet Tunnel mode (bypasses OS TCP stack)")
     p_cli.add_argument("-c", "--config", help="Path to client JSON config file")
     p_cli.add_argument("-v", "--verbose", action="store_true", help="Verbose debug logging")
     p_cli.set_defaults(func=cmd_client)

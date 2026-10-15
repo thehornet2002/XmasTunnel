@@ -6,6 +6,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         "cryptography>=42.0.0",
+        "scapy>=2.5.0",
     ],
     entry_points={
         "console_scripts": [

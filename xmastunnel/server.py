@@ -68,12 +68,30 @@ class TunnelServer:
 
     def start(self, blocking: bool = False) -> None:
         """Starts listening for incoming client tunnel connections."""
-        self._listener_sock = create_tcp_listener(self.config.host, self.config.port)
         self._running = True
-        self.logger.info(f"Server listening on {self.config.host}:{self.config.port}")
+        if getattr(self.config, "raw_mode", False):
+            import platform, subprocess
+            if platform.system() == "Linux":
+                try:
+                    subprocess.run(
+                        ["iptables", "-I", "OUTPUT", "-p", "tcp", "--tcp-flags", "RST", "RST", "--sport", str(self.config.port), "-j", "DROP"],
+                        check=False,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    self.logger.info(f"[Raw Mode] Configured iptables rule to suppress kernel RST on port {self.config.port}")
+                except Exception as e:
+                    self.logger.warning(f"Could not apply iptables rule: {e}")
 
-        self._accept_thread = threading.Thread(target=self._accept_loop, daemon=True, name="AcceptLoop")
-        self._accept_thread.start()
+            self.logger.info(
+                f"[Raw Mode] Server listening on {self.config.host}:{self.config.port} for Raw TCP Packets (TX Flags: {self.config.server_flags})"
+            )
+            self._accept_thread = threading.Thread(target=self._raw_accept_loop, daemon=True, name="RawAcceptLoop")
+            self._accept_thread.start()
+        else:
+            self._listener_sock = create_tcp_listener(self.config.host, self.config.port)
+            self.logger.info(f"Server listening on {self.config.host}:{self.config.port}")
+            self._accept_thread = threading.Thread(target=self._accept_loop, daemon=True, name="AcceptLoop")
+            self._accept_thread.start()
 
         if blocking:
             try:
@@ -82,6 +100,58 @@ class TunnelServer:
             except KeyboardInterrupt:
                 self.logger.info("Keyboard interrupt received, stopping server...")
                 self.stop()
+
+    def _raw_accept_loop(self) -> None:
+        from scapy.all import AsyncSniffer, IP, TCP, Raw
+        from .transport.raw_transport import RawTunnelConnection
+
+        active_clients: Dict[Tuple[str, int], RawTunnelConnection] = {}
+
+        def _on_raw_pkt(pkt):
+            if Raw in pkt and TCP in pkt and IP in pkt:
+                c_ip = pkt[IP].src
+                c_port = pkt[TCP].sport
+                key = (c_ip, c_port)
+                with self._lock:
+                    conn = active_clients.get(key)
+                    if conn is None:
+                        self.logger.info(f"[Raw Mode] Detected new raw client from {c_ip}:{c_port}")
+                        conn = RawTunnelConnection(
+                            local_ip=self.config.host,
+                            local_port=self.config.port,
+                            remote_ip=c_ip,
+                            remote_port=c_port,
+                            tx_flags=self.config.server_flags,
+                            logger=self.logger,
+                        )
+                        active_clients[key] = conn
+                        t = threading.Thread(
+                            target=self._handle_client,
+                            args=(conn,),
+                            daemon=True,
+                            name=f"RawClient-{c_ip}:{c_port}",
+                        )
+                        t.start()
+
+                conn.parser.feed(pkt[Raw].load)
+                while True:
+                    f = conn.parser.next_frame()
+                    if f is None:
+                        break
+                    conn._frame_queue.put(f)
+
+        try:
+            sniffer = AsyncSniffer(
+                filter=f"tcp and dst port {self.config.port}",
+                prn=_on_raw_pkt,
+                store=False,
+            )
+            sniffer.start()
+            while self._running:
+                time.sleep(1.0)
+            sniffer.stop()
+        except Exception as e:
+            self.logger.warning(f"Raw sniffer loop error: {e}")
 
     def _accept_loop(self) -> None:
         while self._running:
@@ -278,6 +348,17 @@ class TunnelServer:
     def stop(self) -> None:
         """Stops the server listener and terminates all active sessions."""
         self._running = False
+        if getattr(self.config, "raw_mode", False):
+            import platform, subprocess
+            if platform.system() == "Linux":
+                try:
+                    subprocess.run(
+                        ["iptables", "-D", "OUTPUT", "-p", "tcp", "--tcp-flags", "RST", "RST", "--sport", str(self.config.port), "-j", "DROP"],
+                        check=False,
+                        stderr=subprocess.DEVNULL,
+                    )
+                except Exception:
+                    pass
         if self._listener_sock:
             try:
                 self._listener_sock.close()

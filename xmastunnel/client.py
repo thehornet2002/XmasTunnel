@@ -43,14 +43,29 @@ class TunnelClient:
     def connect(self) -> None:
         """Connects to remote server and executes cryptographic handshake."""
         self.logger.info(f"Connecting to {self.config.remote_host}:{self.config.remote_port}...")
-        self.conn = connect_tcp(
-            host=self.config.remote_host,
-            port=self.config.remote_port,
-            timeout=self.config.timeout,
-            retry_count=self.config.retry_count,
-            retry_delay=self.config.retry_delay,
-            rate_limit=self.config.rate_limit_bytes_per_sec,
-        )
+        if getattr(self.config, "raw_mode", False):
+            from .transport.raw_transport import RawTunnelConnection
+            self.logger.info(
+                f"[Raw Mode] Using direct Raw TCP packets (Flags: {self.config.client_flags})"
+            )
+            self.conn = RawTunnelConnection(
+                local_ip="0.0.0.0",
+                local_port=54321,
+                remote_ip=self.config.remote_host,
+                remote_port=self.config.remote_port,
+                tx_flags=self.config.client_flags,
+                timeout=self.config.timeout,
+                logger=self.logger,
+            )
+        else:
+            self.conn = connect_tcp(
+                host=self.config.remote_host,
+                port=self.config.remote_port,
+                timeout=self.config.timeout,
+                retry_count=self.config.retry_count,
+                retry_delay=self.config.retry_delay,
+                rate_limit=self.config.rate_limit_bytes_per_sec,
+            )
 
         session_id = secrets.randbits(63)
         self.session = TunnelSession(
