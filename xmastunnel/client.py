@@ -7,7 +7,7 @@ from typing import Optional
 from .config.config import ClientConfig
 from .config.logger import setup_logger
 from .protocol.frame import Frame, FrameType, ProtocolError
-from .session.session import TunnelSession, SessionSecurityError
+from .session.session import TunnelSession, SessionSecurityError, CryptoError
 from .transport.tcp_transport import (
     TCPConnection,
     TransportError,
@@ -261,27 +261,31 @@ class TunnelClient:
                 if frame is None:
                     break
 
-                if frame.frame_type == FrameType.STREAM_DATA:
-                    plaintext = self.session.decrypt_frame(frame)
-                    if len(plaintext) > 4:
-                        stream_id = struct.unpack(">I", plaintext[:4])[0]
-                        data = plaintext[4:]
-                        if hasattr(self, "socks_proxy"):
-                            self.socks_proxy.deliver_remote_data(stream_id, data)
-                elif frame.frame_type == FrameType.STREAM_CLOSE or frame.frame_type == FrameType.STREAM_RESET:
-                    plaintext = self.session.decrypt_frame(frame)
-                    if len(plaintext) >= 4:
-                        stream_id = struct.unpack(">I", plaintext[:4])[0]
-                        if hasattr(self, "socks_proxy"):
-                            self.socks_proxy.close_stream(stream_id)
-                elif frame.frame_type == FrameType.PING:
-                    self.session.decrypt_frame(frame)
-                    pong = self.session.encrypt_frame(FrameType.PONG, b"PONG")
-                    self.conn.send_frame(pong)
-                elif frame.frame_type == FrameType.PONG:
-                    self.session.decrypt_frame(frame)
-                elif frame.frame_type == FrameType.TEARDOWN:
-                    break
+                try:
+                    if frame.frame_type == FrameType.STREAM_DATA:
+                        plaintext = self.session.decrypt_frame(frame)
+                        if len(plaintext) > 4:
+                            stream_id = struct.unpack(">I", plaintext[:4])[0]
+                            data = plaintext[4:]
+                            if hasattr(self, "socks_proxy"):
+                                self.socks_proxy.deliver_remote_data(stream_id, data)
+                    elif frame.frame_type == FrameType.STREAM_CLOSE or frame.frame_type == FrameType.STREAM_RESET:
+                        plaintext = self.session.decrypt_frame(frame)
+                        if len(plaintext) >= 4:
+                            stream_id = struct.unpack(">I", plaintext[:4])[0]
+                            if hasattr(self, "socks_proxy"):
+                                self.socks_proxy.close_stream(stream_id)
+                    elif frame.frame_type == FrameType.PING:
+                        self.session.decrypt_frame(frame)
+                        pong = self.session.encrypt_frame(FrameType.PONG, b"PONG")
+                        self.conn.send_frame(pong)
+                    elif frame.frame_type == FrameType.PONG:
+                        self.session.decrypt_frame(frame)
+                    elif frame.frame_type == FrameType.TEARDOWN:
+                        break
+                except (SessionSecurityError, CryptoError) as e:
+                    self.logger.warning(f"Decryption warning on frame: {e}")
+                    continue
         except Exception as e:
             self.logger.debug(f"Tunnel RX loop ended: {e}")
         finally:

@@ -9,7 +9,7 @@ from .config.config import ServerConfig
 from .config.logger import setup_logger
 from .crypto.kdf import generate_server_psk
 from .protocol.frame import Frame, FrameType, ProtocolError
-from .session.session import TunnelSession, SessionSecurityError
+from .session.session import TunnelSession, SessionSecurityError, CryptoError
 from .session.session_manager import SessionManager
 from .transport.tcp_transport import (
     TCPConnection,
@@ -324,57 +324,61 @@ class TunnelServer:
                     self.logger.info(f"Client {conn.peer_address} disconnected cleanly")
                     break
 
-                if frame.frame_type == FrameType.STREAM_OPEN:
-                    plaintext = session.decrypt_frame(frame)
-                    if len(plaintext) >= 7:
-                        stream_id, host_len, dst_port = struct.unpack(">IBH", plaintext[:7])
-                        dst_host = plaintext[7:7+host_len].decode("utf-8", errors="replace")
-                        channel = StreamChannel(stream_id, dst_host, dst_port, session, conn, self.logger)
-                        with channels_lock:
-                            active_channels[stream_id] = channel
-                        channel.start(on_close=_on_channel_close)
+                try:
+                    if frame.frame_type == FrameType.STREAM_OPEN:
+                        plaintext = session.decrypt_frame(frame)
+                        if len(plaintext) >= 7:
+                            stream_id, host_len, dst_port = struct.unpack(">IBH", plaintext[:7])
+                            dst_host = plaintext[7:7+host_len].decode("utf-8", errors="replace")
+                            channel = StreamChannel(stream_id, dst_host, dst_port, session, conn, self.logger)
+                            with channels_lock:
+                                active_channels[stream_id] = channel
+                            channel.start(on_close=_on_channel_close)
 
-                elif frame.frame_type == FrameType.STREAM_DATA:
-                    plaintext = session.decrypt_frame(frame)
-                    if len(plaintext) > 4:
-                        stream_id = struct.unpack(">I", plaintext[:4])[0]
-                        chunk = plaintext[4:]
-                        with channels_lock:
-                            channel = active_channels.get(stream_id)
-                        if channel:
-                            channel.feed_data(chunk)
+                    elif frame.frame_type == FrameType.STREAM_DATA:
+                        plaintext = session.decrypt_frame(frame)
+                        if len(plaintext) > 4:
+                            stream_id = struct.unpack(">I", plaintext[:4])[0]
+                            chunk = plaintext[4:]
+                            with channels_lock:
+                                channel = active_channels.get(stream_id)
+                            if channel:
+                                channel.feed_data(chunk)
 
-                elif frame.frame_type == FrameType.STREAM_CLOSE or frame.frame_type == FrameType.STREAM_RESET:
-                    plaintext = session.decrypt_frame(frame)
-                    if len(plaintext) >= 4:
-                        stream_id = struct.unpack(">I", plaintext[:4])[0]
-                        with channels_lock:
-                            channel = active_channels.pop(stream_id, None)
-                        if channel:
-                            channel.close()
+                    elif frame.frame_type == FrameType.STREAM_CLOSE or frame.frame_type == FrameType.STREAM_RESET:
+                        plaintext = session.decrypt_frame(frame)
+                        if len(plaintext) >= 4:
+                            stream_id = struct.unpack(">I", plaintext[:4])[0]
+                            with channels_lock:
+                                channel = active_channels.pop(stream_id, None)
+                            if channel:
+                                channel.close()
 
-                elif frame.frame_type == FrameType.DATA:
-                    plaintext = session.decrypt_frame(frame)
-                    self.logger.debug(f"Received {len(plaintext)} plaintext bytes from session 0x{session.session_id:016X}")
-                    reply = self.on_data_received(session, plaintext)
-                    if reply:
-                        out_frame = session.encrypt_frame(FrameType.DATA, reply)
-                        conn.send_frame(out_frame)
+                    elif frame.frame_type == FrameType.DATA:
+                        plaintext = session.decrypt_frame(frame)
+                        self.logger.debug(f"Received {len(plaintext)} plaintext bytes from session 0x{session.session_id:016X}")
+                        reply = self.on_data_received(session, plaintext)
+                        if reply:
+                            out_frame = session.encrypt_frame(FrameType.DATA, reply)
+                            conn.send_frame(out_frame)
 
-                elif frame.frame_type == FrameType.PING:
-                    session.decrypt_frame(frame)
-                    pong_frame = session.encrypt_frame(FrameType.PONG, b"PONG")
-                    conn.send_frame(pong_frame)
+                    elif frame.frame_type == FrameType.PING:
+                        session.decrypt_frame(frame)
+                        pong_frame = session.encrypt_frame(FrameType.PONG, b"PONG")
+                        conn.send_frame(pong_frame)
 
-                elif frame.frame_type == FrameType.REKEY_REQUEST:
-                    self.logger.info(f"Processing rekey request for session 0x{session.session_id:016X}")
-                    ack_frame = session.handle_rekey_request(frame)
-                    conn.send_frame(ack_frame)
-                    self.logger.info(f"Session 0x{session.session_id:016X} keys rotated successfully")
+                    elif frame.frame_type == FrameType.REKEY_REQUEST:
+                        self.logger.info(f"Processing rekey request for session 0x{session.session_id:016X}")
+                        ack_frame = session.handle_rekey_request(frame)
+                        conn.send_frame(ack_frame)
+                        self.logger.info(f"Session 0x{session.session_id:016X} keys rotated successfully")
 
-                elif frame.frame_type == FrameType.TEARDOWN:
-                    self.logger.info(f"Teardown received from session 0x{session.session_id:016X}")
-                    break
+                    elif frame.frame_type == FrameType.TEARDOWN:
+                        self.logger.info(f"Teardown received from session 0x{session.session_id:016X}")
+                        break
+                except (SessionSecurityError, CryptoError) as e:
+                    self.logger.warning(f"Frame decryption warning: {e}")
+                    continue
 
         except SessionSecurityError as e:
             self.logger.error(f"Security error with {conn.peer_address}: {e}")

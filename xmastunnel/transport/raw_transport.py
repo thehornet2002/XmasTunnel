@@ -70,6 +70,7 @@ class RawTunnelConnection:
         self._closed = False
         self._seq = 1000
         self._seq_lock = threading.Lock()
+        self._send_lock = threading.Lock()
         self._sniffer = None
         self._l3_sock = None
 
@@ -118,35 +119,36 @@ class RawTunnelConnection:
 
     def send_frame(self, frame: Frame) -> None:
         """Packs frame into a Raw TCP Packet with custom flags and transmits it."""
-        if self._closed:
-            raise TransportError("Cannot send on closed raw connection")
+        with self._send_lock:
+            if self._closed:
+                raise TransportError("Cannot send on closed raw connection")
 
-        from scapy.all import IP, TCP, Raw, send
+            from scapy.all import IP, TCP, Raw
 
-        data = frame.pack()
-        with self._seq_lock:
-            seq_val = self._seq
-            self._seq = (self._seq + len(data)) & 0xFFFFFFFF
+            data = frame.pack()
+            with self._seq_lock:
+                seq_val = self._seq
+                self._seq = (self._seq + len(data)) & 0xFFFFFFFF
 
-        pkt = (
-            IP(dst=self.remote_ip)
-            / TCP(
-                sport=self.local_port,
-                dport=self.remote_port,
-                flags=self.scapy_flags,
-                seq=seq_val,
+            pkt = (
+                IP(dst=self.remote_ip)
+                / TCP(
+                    sport=self.local_port,
+                    dport=self.remote_port,
+                    flags=self.scapy_flags,
+                    seq=seq_val,
+                )
+                / Raw(load=data)
             )
-            / Raw(load=data)
-        )
 
-        try:
-            if self._l3_sock:
-                self._l3_sock.send(pkt)
-            else:
-                from scapy.all import send
-                send(pkt, verbose=False)
-        except Exception as e:
-            raise TransportError(f"Failed to transmit raw packet: {e}") from e
+            try:
+                if self._l3_sock:
+                    self._l3_sock.send(pkt)
+                else:
+                    from scapy.all import send
+                    send(pkt, verbose=False)
+            except Exception as e:
+                raise TransportError(f"Failed to transmit raw packet: {e}") from e
 
     def recv_frame(self, timeout: Optional[float] = None) -> Optional[Frame]:
         """Waits for next complete frame from sniffer queue."""
