@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xmastunnel"
+version = "1.0.0"
+description = "AES-256-GCM Encrypted TCP Tunnel with Low-Level Packet & Flag Inspection"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "cryptography>=42.0.0",
+]
+
+[project.scripts]
+xmastunnel = "xmastunnel.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["xmastunnel*"]
