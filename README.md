@@ -79,7 +79,7 @@ sudo bash install.sh
 
 یا در صورتی که فایل را از گیت‌هاب مستقیم می‌گیرید:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<USER>/XmasTunnel/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/thehornet2002/XmasTunnel/main/install.sh | sudo bash
 ```
 
 پس از نصب، می‌توانید از هر جای سیستم مستقیماً دستورات زیر را استفاده کنید:
