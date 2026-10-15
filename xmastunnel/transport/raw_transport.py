@@ -71,6 +71,13 @@ class RawTunnelConnection:
         self._seq = 1000
         self._seq_lock = threading.Lock()
         self._sniffer = None
+        self._l3_sock = None
+
+        try:
+            from scapy.all import conf
+            self._l3_sock = conf.L3socket()
+        except Exception as e:
+            self.logger.debug(f"Persistent L3 socket notice: {e}")
 
         if start_sniffer:
             from scapy.all import AsyncSniffer, TCP, IP, Raw
@@ -133,7 +140,11 @@ class RawTunnelConnection:
         )
 
         try:
-            send(pkt, verbose=False)
+            if self._l3_sock:
+                self._l3_sock.send(pkt)
+            else:
+                from scapy.all import send
+                send(pkt, verbose=False)
         except Exception as e:
             raise TransportError(f"Failed to transmit raw packet: {e}") from e
 
@@ -154,6 +165,11 @@ class RawTunnelConnection:
             if self._sniffer:
                 try:
                     self._sniffer.stop()
+                except Exception:
+                    pass
+            if self._l3_sock:
+                try:
+                    self._l3_sock.close()
                 except Exception:
                     pass
             self.logger.info("[RawTransport] Raw connection closed.")
