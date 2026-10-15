@@ -52,12 +52,14 @@ XmasTunnel/
 │   ├── LOW_LEVEL_NETWORKING.md
 │   └── SECURITY.md
 ├── scripts/                    # اسکریپت‌های آماده راه‌اندازی برای لینوکس و ویندوز
+│   ├── install_ubuntu.sh       # اسکریپت نصب یک‌دستوری در اوبونتو
 │   ├── server_ubuntu.sh        # راه‌اندازی خودکار سرور در اوبونتو
 │   ├── client_ubuntu.sh        # راه‌اندازی خودکار کلاینت در اوبونتو
 │   ├── server_windows.ps1      # راه‌اندازی خودکار سرور در ویندوز (PowerShell)
 │   ├── client_windows.ps1      # راه‌اندازی خودکار کلاینت در ویندوز (PowerShell)
 │   ├── server_windows.bat      # لانچر سریع سرور ویندوز
 │   └── client_windows.bat      # لانچر سریع کلاینت ویندوز
+├── install.sh                  # اسکریپت نصب یک‌دستوری سیستم با venv و دسترسی‌های لینوکس
 ├── requirements.txt
 ├── config_server.json
 └── config_client.json
@@ -67,9 +69,37 @@ XmasTunnel/
 
 ## نیازمندی‌ها و نصب (Installation)
 
+### نصب با یک دستور در سرور و کلاینت اوبونتو (One-Command Installer):
+
+این دستور به طور خودکار وابستگی‌های سیستمی (`python3-venv`, `pip`, `libcap2-bin`) را نصب کرده، محیط ایزوله `venv` را می‌سازد، وابستگی‌ها را نصب نموده، قابلیت‌های `CAP_NET_RAW` لینوکس را تنظیم می‌کند و دستورات سیستمی سراسری (`xmastunnel`, `xmastunnel-server`, `xmastunnel-client`) و سرویس systemd را اضافه می‌کند:
+
+```bash
+sudo bash install.sh
+```
+
+یا در صورتی که فایل را از گیت‌هاب مستقیم می‌گیرید:
+```bash
+curl -fsSL https://raw.githubusercontent.com/<USER>/XmasTunnel/main/install.sh | sudo bash
+```
+
+پس از نصب، می‌توانید از هر جای سیستم مستقیماً دستورات زیر را استفاده کنید:
+```bash
+# در سرور:
+xmastunnel-server 8443
+
+# در کلاینت:
+xmastunnel-client <SERVER_IP> 8443 "<KEY>" --xmas-probe
+```
+
+---
+
+### نصب دستی (Manual Installation):
+
 این پروژه از **Python 3.11+** استفاده می‌کند. وابستگی‌ها را با دستور زیر نصب کنید:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
