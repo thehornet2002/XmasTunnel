@@ -94,6 +94,9 @@ $SUDO chmod +x /usr/local/bin/xmastunnel
 $SUDO tee /usr/local/bin/xmastunnel-server >/dev/null <<EOF
 #!/usr/bin/env bash
 export PYTHONPATH="$INSTALL_DIR:\$PYTHONPATH"
+if [ \$# -eq 0 ] && [ -t 0 ]; then
+    exec "$VENV_DIR/bin/python3" -m xmastunnel server --interactive
+fi
 PORT="\${1:-8443}"
 KEY="\${2:-}"
 if [ -n "\$KEY" ]; then
@@ -107,15 +110,22 @@ $SUDO chmod +x /usr/local/bin/xmastunnel-server
 $SUDO tee /usr/local/bin/xmastunnel-client >/dev/null <<EOF
 #!/usr/bin/env bash
 export PYTHONPATH="$INSTALL_DIR:\$PYTHONPATH"
-SERVER="\${1:-127.0.0.1}"
-PORT="\${2:-8443}"
-KEY="\${3:-}"
-EXTRA="\${@:4}"
-if [ -z "\$KEY" ]; then
-    echo -e "${RED}[!] Usage: xmastunnel-client <SERVER_IP> <PORT> <KEY> [OPTIONS]${NC}"
-    exit 1
+ARG="\${1:-}"
+if [[ "\$ARG" =~ ^xmas:// ]]; then
+    exec "$VENV_DIR/bin/python3" -m xmastunnel client --token "\$ARG"
 fi
-exec "$VENV_DIR/bin/python3" -m xmastunnel client -s "\$SERVER" -p "\$PORT" --key "\$KEY" \$EXTRA
+if [ -n "\$ARG" ]; then
+    SERVER="\$ARG"
+    PORT="\${2:-8443}"
+    KEY="\${3:-}"
+    EXTRA="\${@:4}"
+    if [ -z "\$KEY" ]; then
+        read -rp "Enter Pre-Shared Key (PSK): " KEY
+    fi
+    exec "$VENV_DIR/bin/python3" -m xmastunnel client -s "\$SERVER" -p "\$PORT" --key "\$KEY" \$EXTRA
+else
+    exec "$VENV_DIR/bin/python3" -m xmastunnel client
+fi
 EOF
 $SUDO chmod +x /usr/local/bin/xmastunnel-client
 

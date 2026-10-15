@@ -7,6 +7,8 @@ from .config.config import (
     ClientConfig,
     load_server_config,
     load_client_config,
+    encode_client_token,
+    decode_client_token,
 )
 from .config.logger import setup_logger
 from .crypto.kdf import generate_server_psk
@@ -14,6 +16,34 @@ from .packet_engine.flags import TEST_PROFILES, parse_flags, flags_to_str
 from .packet_engine.raw_engine import RawPacketEngine, CapabilityReport
 from .server import TunnelServer
 from .client import TunnelClient
+
+
+def get_public_ip() -> str:
+    """Discovers external public IP address with fallbacks."""
+    import urllib.request
+    providers = [
+        "https://api.ipify.org",
+        "https://icanhazip.com",
+        "https://ifconfig.me/ip",
+    ]
+    for url in providers:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "curl/7.68.0"})
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                ip = resp.read().decode("utf-8").strip()
+                if ip:
+                    return ip
+        except Exception:
+            continue
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception:
+        return "127.0.0.1"
 
 
 def cmd_gen_key(args: argparse.Namespace) -> None:
@@ -25,7 +55,106 @@ def cmd_gen_key(args: argparse.Namespace) -> None:
 
 
 def cmd_server(args: argparse.Namespace) -> None:
-    if args.config:
+    if getattr(args, "interactive", False) or (not args.config and args.port == 8443 and not args.key and sys.stdin.isatty()):
+        # Interactive Setup Wizard
+        print("=" * 68)
+        print("          XmasTunnel Server Setup & Config Generator          ")
+        print("=" * 68)
+        # 1. Port
+        p_in = input("1. Enter listening port [default: 8443]: ").strip()
+        port = int(p_in) if p_in else 8443
+
+        # 2. Client IP
+        client_ip = input("2. Enter allowed Client IP (press Enter for ANY): ").strip() or "ANY"
+
+        # 3. Two-Part Flags Configuration
+        print("\n3. Configure TCP Flags in Two Parts:")
+        print("   --- [Part A: Server TX Flags (فلگ‌های ارسالی سرور)] ---")
+        print("   [1] SYN|ACK (Normal Handshake Response - Default)")
+        print("   [2] RST|ACK (Connection Reset/Probe Response)")
+        print("   [3] Xmas Tree (FIN|PSH|URG)")
+        print("   [4] Custom flags (e.g. ACK,PSH)")
+        print("   [5] None")
+        sf_choice = input("Select Server TX profile [1-5, default: 1]: ").strip()
+        if sf_choice == "2":
+            server_flags = "RST_ACK"
+        elif sf_choice == "3":
+            server_flags = "XMAS_TREE"
+        elif sf_choice == "4":
+            server_flags = input("Enter server flags: ").strip() or "SYN_ACK"
+        elif sf_choice == "5":
+            server_flags = "NONE"
+        else:
+            server_flags = "SYN_ACK"
+
+        print("\n   --- [Part B: Client TX Flags (فلگ‌های ارسالی کلاینت)] ---")
+        print("   [1] Xmas Tree (FIN|PSH|URG) - Classic Christmas Scan (Default)")
+        print("   [2] SYN Probe (SYN)")
+        print("   [3] All Flags (FIN|SYN|RST|PSH|ACK|URG|ECE|CWR)")
+        print("   [4] Custom flags (e.g. FIN,ACK)")
+        print("   [5] None")
+        cf_choice = input("Select Client TX profile [1-5, default: 1]: ").strip()
+        if cf_choice == "2":
+            client_flags = "SYN"
+        elif cf_choice == "3":
+            client_flags = "ALL_FLAGS"
+        elif cf_choice == "4":
+            client_flags = input("Enter client flags: ").strip() or "XMAS_TREE"
+        elif cf_choice == "5":
+            client_flags = "NONE"
+        else:
+            client_flags = "XMAS_TREE"
+
+        # 4. Key
+        psk = args.key or generate_server_psk()
+
+        # 5. Public IP
+        print("\n[*] Detecting Server Public IP...")
+        server_ip = get_public_ip()
+        ip_override = input(f"Detected IP: {server_ip}. Press Enter to keep or type IP: ").strip()
+        if ip_override:
+            server_ip = ip_override
+
+        # 6. Generate configuration token
+        token = encode_client_token(
+            server_ip=server_ip,
+            port=port,
+            psk=psk,
+            client_flags=client_flags,
+            server_flags=server_flags,
+            client_ip=client_ip,
+        )
+
+        print("\n" + "=" * 72)
+        print("                   CLIENT CONFIGURATION PACKAGE                   ")
+        print("=" * 72)
+        print(f" Server IP:        {server_ip}")
+        print(f" Port:             {port}")
+        print(f" Shared Key (PSK): {psk}")
+        print(f" Server TX Flags:  {server_flags}")
+        print(f" Client TX Flags:  {client_flags}")
+        print(f" Allowed Clt IP:   {client_ip}")
+        print("-" * 72)
+        print(" >>> CLIENT CONFIG TOKEN (Copy & paste into Client):")
+        print(f"\n{token}\n")
+        print(" >>> ONE-COMMAND LAUNCH FOR CLIENT:")
+        print(f' xmastunnel client --token "{token}"')
+        print("=" * 72 + "\n")
+
+        with open("client_token.txt", "w", encoding="utf-8") as f:
+            f.write(token + "\n")
+        print("[+] Token saved to 'client_token.txt'. Starting server...\n")
+
+        config = ServerConfig(
+            host=args.host,
+            port=port,
+            psk=psk,
+            server_flags=server_flags,
+            client_flags=client_flags,
+            rate_limit_bytes_per_sec=args.rate_limit,
+            verbose=args.verbose,
+        )
+    elif args.config:
         config = load_server_config(args.config)
     else:
         config = ServerConfig(
@@ -42,36 +171,78 @@ def cmd_server(args: argparse.Namespace) -> None:
 
 
 def cmd_client(args: argparse.Namespace) -> None:
+    remote_host = args.server
+    remote_port = args.port
+    psk = args.key
+    client_flags = "NONE"
+    server_flags = "NONE"
+
+    # 1. Token passed via argument
+    if getattr(args, "token", None):
+        cfg_data = decode_client_token(args.token)
+        remote_host = cfg_data.get("server", remote_host)
+        remote_port = int(cfg_data.get("port", remote_port))
+        psk = cfg_data.get("psk", psk)
+        client_flags = cfg_data.get("client_flags", cfg_data.get("flags", "NONE"))
+        server_flags = cfg_data.get("server_flags", "NONE")
+
+    # 2. Interactive token prompt if key not given
+    elif not psk and not args.config and sys.stdin.isatty():
+        print("=" * 64)
+        print("          XmasTunnel Client Launcher                      ")
+        print("=" * 64)
+        token_input = input("Paste Client Configuration Token (xmas://...): ").strip()
+        if token_input.startswith("xmas://") or len(token_input) > 20:
+            cfg_data = decode_client_token(token_input)
+            remote_host = cfg_data.get("server", remote_host)
+            remote_port = int(cfg_data.get("port", remote_port))
+            psk = cfg_data.get("psk", "")
+            client_flags = cfg_data.get("client_flags", cfg_data.get("flags", "NONE"))
+            server_flags = cfg_data.get("server_flags", "NONE")
+        else:
+            psk = token_input
+
     if args.config:
         config = load_client_config(args.config)
     else:
-        if not args.key:
-            print("[!] Error: --key is required to connect to server.", file=sys.stderr)
+        if not psk:
+            print("[!] Error: Pre-shared key or --token is required.", file=sys.stderr)
             sys.exit(1)
         config = ClientConfig(
-            remote_host=args.server,
-            remote_port=args.port,
-            psk=args.key,
+            remote_host=remote_host,
+            remote_port=remote_port,
+            psk=psk,
+            client_flags=client_flags,
+            server_flags=server_flags,
             rate_limit_bytes_per_sec=args.rate_limit,
             verbose=args.verbose,
         )
 
-    client = TunnelClient(config)
-    try:
-        if getattr(args, "xmas_probe", False):
-            print("[*] Dispatching Xmas Tree probe packet (FIN|PSH|URG) to server...")
+    # 3. Test flags if specified or --xmas-probe
+    effective_client_flags = "XMAS_TREE" if getattr(args, "xmas_probe", False) else client_flags
+    if effective_client_flags and effective_client_flags != "NONE":
+        try:
+            parsed_c_flags = parse_flags(effective_client_flags)
+            print(f"[*] Dispatching Client TCP Flag Probe [{flags_to_str(parsed_c_flags)}] to {config.remote_host}:{config.remote_port}...")
             engine = RawPacketEngine(fallback_to_loopback=True)
             probe_pkt = engine.craft_tcp_packet(
                 src_ip="127.0.0.1",
-                dst_ip=args.server,
+                dst_ip=config.remote_host,
                 src_port=54321,
-                dst_port=args.port,
-                flags=parse_flags("XMAS_TREE"),
-                payload=b"XMAS_PROBE_HEADER",
+                dst_port=config.remote_port,
+                flags=parsed_c_flags,
+                payload=b"CLIENT_TCP_PROBE",
             )
             probe_res = engine.send_packet(probe_pkt, simulate=True)
-            print(f"[+] Xmas Probe Status: {probe_res['status']} | Flags: {probe_res['flags']} | Checksum Valid: {probe_res['checksum_valid']}")
+            print(f"[+] Client Probe Status: {probe_res['status']} | Checksum Valid: {probe_res['checksum_valid']}")
+            if server_flags and server_flags != "NONE":
+                parsed_s_flags = parse_flags(server_flags)
+                print(f"[+] Server Flag Response Profile: [{flags_to_str(parsed_s_flags)}]")
+        except Exception as e:
+            print(f"[!] Warning during flag test: {e}")
 
+    client = TunnelClient(config)
+    try:
         client.connect()
         if args.ping:
             print("[*] Running ping latency checks...")
@@ -173,6 +344,7 @@ def main() -> None:
 
     # server command
     p_srv = subparsers.add_parser("server", help="Start the tunnel server")
+    p_srv.add_argument("-i", "--interactive", action="store_true", help="Launch interactive setup wizard and generate client token")
     p_srv.add_argument("--host", default="0.0.0.0", help="Listen host (default: 0.0.0.0)")
     p_srv.add_argument("-p", "--port", type=int, default=8443, help="Listen port (default: 8443)")
     p_srv.add_argument("--key", default=None, help="Pre-shared key (generated automatically if omitted)")
@@ -183,6 +355,7 @@ def main() -> None:
 
     # client command
     p_cli = subparsers.add_parser("client", help="Start the tunnel client")
+    p_cli.add_argument("-t", "--token", help="Client configuration token (xmas://...) containing IP, port, key and flags")
     p_cli.add_argument("-s", "--server", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
     p_cli.add_argument("-p", "--port", type=int, default=8443, help="Server port (default: 8443)")
     p_cli.add_argument("--key", default="", help="Pre-shared key")

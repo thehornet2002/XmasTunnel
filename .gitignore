@@ -1,8 +1,58 @@
-.venv/*
-*/__pycache__/*
-xmastunnel/config/__pycache__/*
-xmastunnel/crypto/__pycache__/*
-xmastunnel/packet_engine/__pycache__/*
-xmastunnel/protocol/__pycache__/*
-xmastunnel/session/__pycache__/*
-xmastunnel/transport/__pycache__/*
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Logs & Runtime artifacts
+*.log
+*.log.*
+client_token.txt
+*.pid
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

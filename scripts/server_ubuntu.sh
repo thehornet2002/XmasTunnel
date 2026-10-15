@@ -13,8 +13,8 @@ echo "=========================================================="
 # 1. Check Python3 and venv
 if ! command -v python3 &>/dev/null; then
     echo "[*] Installing Python3 and tools..."
-    sudo apt update
-    sudo apt install -y python3 python3-pip python3-venv libcap2-bin
+    sudo apt update -qq
+    sudo apt install -y -qq python3 python3-pip python3-venv libcap2-bin curl
 fi
 
 # 2. Virtual Environment
@@ -24,24 +24,28 @@ if [ ! -d ".venv" ]; then
 fi
 
 source .venv/bin/activate
-pip install -U pip --quiet
+pip install -U pip setuptools --quiet
 pip install -r requirements.txt --quiet
+pip install -e . --quiet
 
-# 3. Optional: Enable CAP_NET_RAW for packet engine without root
+# 3. Enable CAP_NET_RAW for packet engine without root
 PYTHON_BIN="$(readlink -f .venv/bin/python3)"
 if command -v setcap &>/dev/null; then
-    echo "[*] Applying CAP_NET_RAW to Python binary for low-level packet tests..."
-    sudo setcap cap_net_raw,cap_net_admin+eip "$PYTHON_BIN" 2>/dev/null || echo "[!] Notice: Run with sudo if raw socket capabilities are required."
+    sudo setcap cap_net_raw,cap_net_admin+eip "$PYTHON_BIN" 2>/dev/null || true
 fi
 
 # 4. Parameters
-HOST="${1:-0.0.0.0}"
-PORT="${2:-8443}"
-KEY="${3:-}"
-
-echo "[*] Starting XmasTunnel Server on $HOST:$PORT..."
-if [ -n "$KEY" ]; then
-    python3 -m xmastunnel server --host "$HOST" --port "$PORT" --key "$KEY"
+if [ $# -eq 0 ] && [ -t 0 ]; then
+    # Interactive wizard: asks Port, Client IP, Flags, gives Token
+    python3 -m xmastunnel server --interactive
 else
-    python3 -m xmastunnel server --host "$HOST" --port "$PORT"
+    HOST="${1:-0.0.0.0}"
+    PORT="${2:-8443}"
+    KEY="${3:-}"
+    echo "[*] Starting XmasTunnel Server on $HOST:$PORT..."
+    if [ -n "$KEY" ]; then
+        python3 -m xmastunnel server --host "$HOST" --port "$PORT" --key "$KEY"
+    else
+        python3 -m xmastunnel server --host "$HOST" --port "$PORT"
+    fi
 fi
