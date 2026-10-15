@@ -53,6 +53,7 @@ class RawTunnelConnection:
         remote_port: int,
         tx_flags: str = "XMAS_TREE",
         timeout: float = 30.0,
+        start_sniffer: bool = True,
         logger: Optional[logging.Logger] = None,
     ):
         self.local_ip = local_ip
@@ -69,34 +70,36 @@ class RawTunnelConnection:
         self._closed = False
         self._seq = 1000
         self._seq_lock = threading.Lock()
+        self._sniffer = None
 
-        # Start Scapy AsyncSniffer
-        from scapy.all import AsyncSniffer, TCP, IP, Raw
-        
-        # BPF filter matching packets from remote party to our local port
-        bpf_filter = f"tcp and dst port {self.local_port}"
-        if self.remote_ip and self.remote_ip != "0.0.0.0" and self.remote_ip != "ANY":
-            bpf_filter = f"tcp and src host {self.remote_ip} and dst port {self.local_port}"
+        if start_sniffer:
+            from scapy.all import AsyncSniffer, TCP, IP, Raw
+            bpf_filter = f"tcp and dst port {self.local_port}"
+            if self.remote_ip and self.remote_ip != "0.0.0.0" and self.remote_ip != "ANY":
+                bpf_filter = f"tcp and src host {self.remote_ip} and dst port {self.local_port}"
 
-        def _on_packet(pkt):
-            if Raw in pkt and TCP in pkt:
-                data = pkt[Raw].load
-                self.parser.feed(data)
-                while True:
-                    f = self.parser.next_frame()
-                    if f is None:
-                        break
-                    self._frame_queue.put(f)
+            def _on_packet(pkt):
+                if Raw in pkt and TCP in pkt:
+                    self.feed_raw_packet(pkt[Raw].load)
 
-        try:
-            self._sniffer = AsyncSniffer(filter=bpf_filter, prn=_on_packet, store=False)
-            self._sniffer.start()
-            self.logger.info(
-                f"[RawTransport] Sniffer active for dst port {self.local_port} (TX Flags: {self.tx_flags_name})"
-            )
-        except Exception as e:
-            self.logger.warning(f"[RawTransport] Could not start packet sniffer: {e}")
-            self._sniffer = None
+            try:
+                self._sniffer = AsyncSniffer(filter=bpf_filter, prn=_on_packet, store=False)
+                self._sniffer.start()
+                self.logger.info(
+                    f"[RawTransport] Sniffer active for dst port {self.local_port} (TX Flags: {self.tx_flags_name})"
+                )
+            except Exception as e:
+                self.logger.warning(f"[RawTransport] Could not start packet sniffer: {e}")
+                self._sniffer = None
+
+    def feed_raw_packet(self, data: bytes) -> None:
+        """Feeds raw payload bytes into the parser and queues assembly frames."""
+        self.parser.feed(data)
+        while True:
+            f = self.parser.next_frame()
+            if f is None:
+                break
+            self._frame_queue.put(f)
 
     @property
     def peer_address(self) -> Tuple[str, int]:

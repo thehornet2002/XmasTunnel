@@ -2,6 +2,7 @@ import logging
 import socket
 import struct
 import threading
+import time
 from typing import Callable, Dict, Optional
 from .config.config import ServerConfig
 from .config.logger import setup_logger
@@ -122,6 +123,7 @@ class TunnelServer:
                             remote_ip=c_ip,
                             remote_port=c_port,
                             tx_flags=self.config.server_flags,
+                            start_sniffer=False,
                             logger=self.logger,
                         )
                         active_clients[key] = conn
@@ -133,12 +135,7 @@ class TunnelServer:
                         )
                         t.start()
 
-                conn.parser.feed(pkt[Raw].load)
-                while True:
-                    f = conn.parser.next_frame()
-                    if f is None:
-                        break
-                    conn._frame_queue.put(f)
+                conn.feed_raw_packet(pkt[Raw].load)
 
         try:
             sniffer = AsyncSniffer(
