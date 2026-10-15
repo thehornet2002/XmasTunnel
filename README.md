@@ -1,226 +1,277 @@
 # XmasTunnel 🎄
-### Secure AES-256-GCM Encrypted TCP Tunnel with Low-Level Packet & Flag Inspection Engine
+### High-Performance AES-256-GCM Encrypted TCP Tunnel with SOCKS5 Proxy & Low-Level TCP Flag Inspection
+
+[![Python](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://python.org)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-22%20Passed-brightgreen.svg)]()
 
 ---
 
-## معرفی پروژه (Project Overview)
+## 1. Project Overview
 
-پروژه **XmasTunnel** یک سامانه ماژولار و مهندسی‌شده کلاینت-سرور برای ایجاد **تونل‌های TCP رمزنگاری‌شده با AES-256-GCM** همراه با ماژول اختصاصی **کنترل و تحلیل بسته‌های سطح پایین شبکه و فلگ‌های هدر TCP** (`FIN, SYN, RST, PSH, ACK, URG, ECE, CWR`) است.
+**XmasTunnel** is a production-grade, modular client-server TCP tunneling solution designed for encrypted communication, connection multiplexing via a local SOCKS5 proxy, and low-level TCP packet inspection (`FIN, SYN, RST, PSH, ACK, URG, ECE, CWR`).
 
-این نرم‌افزار با تفکیک کامل پشته انتقال قابل اتکا از دسترسی سطح پایین شبکه پیاده‌سازی شده و از کتابخانه‌های استاندارد رمزنگاری و استانداردهای RFC برای محاسبه Checksum و مدیریت بسته استفاده می‌کند.
+The software features complete architectural separation between:
+- **Authenticated Encryption Layer:** AES-256-GCM with 128-bit authentication tags, directional session keys, monotonic nonces, and sliding-window anti-replay defense.
+- **Multiplexed SOCKS5 Proxy:** Built-in RFC 1928 SOCKS5 server listening locally (default `127.0.0.1:10829`) and proxying applications/browsers through the encrypted tunnel.
+- **Packet Engine (Low-Level Control):** Real-time crafting, validation, and injection of raw IPv4/TCP headers with custom TCP control flags (such as the classic Christmas tree scan `FIN|PSH|URG`, `ALL_FLAGS`, or custom bitmasks) utilizing **Npcap** on Windows and **Raw Sockets** (`AF_PACKET` / `IPPROTO_RAW`) on Linux.
 
 ---
 
-## ساختار پروژه (Directory Structure)
+## 2. Architecture & Modules
 
 ```
 XmasTunnel/
 ├── xmastunnel/
-│   ├── crypto/                 # لایه رمزنگاری و مدیریت کلید
-│   │   ├── aes_gcm.py          # پیاده‌سازی AES-256-GCM و تایید اصالت تگ
-│   │   ├── kdf.py              # مشتق‌سازی کلید با HKDF-SHA256 و PBKDF2
-│   │   └── nonce_manager.py    # مدیریت Nonce بدون تکرار و پنجره ضد بازپخش (Anti-Replay)
-│   ├── protocol/               # پروتکل داخلی و ماشین حالت
-│   │   ├── frame.py            # قاب‌بندی ۲۴ بایتی باینری و بافر جریان
-│   │   └── state_machine.py    # ماشین حالت پروتکل مستقل از فلگ‌های TCP
-│   ├── transport/              # لایه انتقال شبکه
-│   │   └── tcp_transport.py    # سوکت‌های TCP با TCP_NODELAY، محدودساز نرخ و Timeout
-│   ├── session/                # مدیریت نشست‌ها
-│   │   ├── session.py          # فرآیند Handshake چهار مرحله‌ای و چرخش کلید
-│   │   └── session_manager.py  # مدیریت چرخه حیات نشست‌ها و انقضای نشست‌های غیرفعال
-│   ├── packet_engine/          # موتور سطح پایین بسته‌ها و فلگ‌های TCP
-│   │   ├── flags.py            # بیت‌ماسک فلگ‌های TCP و پروفایل‌های آزمایشی
-│   │   ├── checksum.py         # الگوریتم چک‌سام RFC 1071 و Pseudo-Header
-│   │   ├── packet.py           # هدرهای IPv4/TCP و اعتبارسنجی بسته‌های خام
-│   │   └── raw_engine.py       # موتور بسته‌های خام و تحلیل محدودیت‌های سیستم‌عامل
-│   ├── config/                 # تنظیمات و لاگینگ امن
-│   │   ├── config.py           # کلاس‌های پیکربندی کلاینت، سرور و آزمون
-│   │   └── logger.py           # لاگر با فیلتر خودکار کلیدها و داده‌های حساس
-│   ├── server.py               # سرور اصلی تونل
-│   ├── client.py               # کلاینت اصلی تونل
-│   └── cli.py                  # رابط خط فرمان (CLI)
-├── tests/                      # آزمون‌های واحد، یکپارچگی و امنیتی
+│   ├── crypto/                 # Cryptography & Key Management
+│   │   ├── aes_gcm.py          # AES-256-GCM cipher with AAD validation
+│   │   ├── kdf.py              # HKDF-SHA256 & PBKDF2 key derivation
+│   │   └── nonce_manager.py    # Monotonic 96-bit nonces & anti-replay window
+│   ├── protocol/               # Protocol & Framing Layer
+│   │   ├── frame.py            # 24-byte binary framing & stream parser
+│   │   └── state_machine.py    # Independent protocol state machine
+│   ├── transport/              # Network Transport Engines
+│   │   ├── tcp_transport.py    # Standard non-blocking TCP socket stream
+│   │   └── raw_transport.py    # Raw packet tunnel (Npcap / AF_PACKET)
+│   ├── session/                # Session Lifecycle Management
+│   │   ├── session.py          # 4-way cryptographic handshake & re-keying
+│   │   └── session_manager.py  # Concurrency limits & idle session reaper
+│   ├── socks/                  # SOCKS5 Proxy & Multiplexing
+│   │   └── socks_server.py     # RFC 1928 local proxy & stream multiplexer
+│   ├── packet_engine/          # Low-Level Packet Crafting
+│   │   ├── flags.py            # TCP control flags bitmasks & test profiles
+│   │   ├── checksum.py         # RFC 1071 internet checksum & pseudo-header
+│   │   ├── packet.py           # IPv4 & TCP binary header serialization
+│   │   └── raw_engine.py       # Raw packet builder & capability probe
+│   ├── config/                 # Configuration & Logging
+│   │   ├── config.py           # Server/Client dataclasses & xmas:// tokens
+│   │   └── logger.py           # Sanitized logging redacting sensitive keys
+│   ├── server.py               # Tunnel Server Implementation
+│   ├── client.py               # Tunnel Client Implementation
+│   └── cli.py                  # Command Line Interface (CLI)
+├── tests/                      # Comprehensive Test Suite (22 Tests)
 │   ├── test_crypto.py
 │   ├── test_protocol.py
 │   ├── test_session.py
 │   ├── test_transport.py
 │   ├── test_packet_engine.py
+│   ├── test_socks.py
 │   └── test_integration.py
-├── docs/                       # مستندات فنی
+├── docs/                       # Technical Documentation
 │   ├── ARCHITECTURE.md
 │   ├── PROTOCOL.md
 │   ├── LOW_LEVEL_NETWORKING.md
 │   └── SECURITY.md
-├── scripts/                    # اسکریپت‌های آماده راه‌اندازی برای لینوکس و ویندوز
-│   ├── install_ubuntu.sh       # اسکریپت نصب یک‌دستوری در اوبونتو
-│   ├── server_ubuntu.sh        # راه‌اندازی خودکار سرور در اوبونتو
-│   ├── client_ubuntu.sh        # راه‌اندازی خودکار کلاینت در اوبونتو
-│   ├── server_windows.ps1      # راه‌اندازی خودکار سرور در ویندوز (PowerShell)
-│   ├── client_windows.ps1      # راه‌اندازی خودکار کلاینت در ویندوز (PowerShell)
-│   ├── server_windows.bat      # لانچر سریع سرور ویندوز
-│   └── client_windows.bat      # لانچر سریع کلاینت ویندوز
-├── install.sh                  # اسکریپت نصب یک‌دستوری سیستم با venv و دسترسی‌های لینوکس
-├── requirements.txt
-├── config_server.json
-└── config_client.json
+├── scripts/                    # Platform Setup & Launch Scripts
+│   ├── install_ubuntu.sh       # Ubuntu one-command installer
+│   ├── server_ubuntu.sh        # Ubuntu server launch wizard
+│   ├── client_ubuntu.sh        # Ubuntu client launch wizard
+│   ├── server_windows.ps1      # Windows server launch wizard (PowerShell)
+│   ├── client_windows.ps1      # Windows client launch wizard (PowerShell)
+│   ├── server_windows.bat      # Windows server quick double-click launcher
+│   └── client_windows.bat      # Windows client quick double-click launcher
+├── install.sh                  # Root automated installer for Linux
+├── pyproject.toml              # Standard Python build configuration
+├── setup.py                    # Setuptools installer
+└── requirements.txt            # Package dependencies
 ```
 
 ---
 
-## نیازمندی‌ها و نصب (Installation)
+## 3. Quick Installation
 
-### نصب با یک دستور در سرور و کلاینت اوبونتو (One-Command Installer):
+### Linux / Ubuntu (One-Command Automated Installer)
 
-این دستور به طور خودکار وابستگی‌های سیستمی (`python3-venv`, `pip`, `libcap2-bin`) را نصب کرده، محیط ایزوله `venv` را می‌سازد، وابستگی‌ها را نصب نموده، قابلیت‌های `CAP_NET_RAW` لینوکس را تنظیم می‌کند و دستورات سیستمی سراسری (`xmastunnel`, `xmastunnel-server`, `xmastunnel-client`) و سرویس systemd را اضافه می‌کند:
+Run the following command on your server or client:
 
 ```bash
 sudo bash install.sh
 ```
 
-یا در صورتی که فایل را از گیت‌هاب مستقیم می‌گیرید:
+Or directly via `curl`:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/thehornet2002/XmasTunnel/main/install.sh | sudo bash
 ```
 
-پس از نصب، می‌توانید از هر جای سیستم مستقیماً دستورات زیر را استفاده کنید:
-```bash
-# در سرور:
-xmastunnel-server 8443
+This installer automatically:
+- Installs system prerequisites (`python3-venv`, `pip`, `libcap2-bin`, `git`, `curl`).
+- Builds an isolated virtual environment (`.venv`).
+- Installs dependencies (`cryptography`, `scapy`, `pytest`) and packages `xmastunnel`.
+- Assigns `CAP_NET_RAW` Linux capabilities for packet crafting without root.
+- Adds global terminal binaries (`xmastunnel`, `xmastunnel-server`, `xmastunnel-client`).
+- Configures a `systemd` background service template at `/etc/systemd/system/xmastunnel.service`.
 
-# در کلاینت:
-xmastunnel-client <SERVER_IP> 8443 "<KEY>" --xmas-probe
+### Windows Installation
+
+1. Clone or download the repository to your machine.
+2. Ensure [Python 3.9+](https://python.org) is installed and in your system PATH.
+3. Install dependencies:
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   pip install -e .
+   ```
+4. Ensure [Wireshark](https://www.wireshark.org/) or [Npcap](https://npcap.com/) is installed if you intend to inspect or inject raw packets.
+
+---
+
+## 4. Usage Guide
+
+### Step 1: Launch the Server (Ubuntu or Windows)
+
+Run the interactive server setup wizard:
+
+```bash
+# On Ubuntu:
+xmastunnel-server
+
+# Or on Windows:
+powershell -ExecutionPolicy Bypass -File .\scripts\server_windows.ps1
+```
+
+The interactive wizard prompts for:
+1. **Listening Port:** e.g. `1258` (or default `8443`).
+2. **Allowed Client IP:** Press Enter for `ANY`.
+3. **TCP Flags Configuration (Two-Part):**
+   - **Part A (Server TX Flags):** Flags emitted by server (e.g. `SYN|ACK`, `RST|ACK`, or custom).
+   - **Part B (Client TX Flags):** Flags expected from client (e.g. `XMAS_TREE` = `FIN|PSH|URG`).
+4. **Transmission Engine:**
+   - `[1] Raw Xmas Packet Tunnel:` Bypasses OS kernel stack; every packet on the wire has your exact custom flags.
+   - `[2] Standard TCP Stream:` Uses reliable TCP socket stream, compatible with all routers and NATs.
+
+The server generates a self-contained, portable client token:
+```text
+========================================================================
+                   CLIENT CONFIGURATION PACKAGE                   
+========================================================================
+ Server IP:        31.57.46.120
+ Port:             1258
+ Shared Key (PSK): 40f78835a1073540dffec5af6006ebad8453f005deefea2b...
+ Engine Mode:      Standard TCP
+ Server TX Flags:  SYN_ACK
+ Client TX Flags:  XMAS_TREE
+ Allowed Clt IP:   ANY
+------------------------------------------------------------------------
+ >>> CLIENT CONFIG TOKEN:
+
+xmas://eyJzZXJ2ZXIiOiIzMS41Ny40Ni4xMjAiLCJwb3J0IjoxMjU4LCJwc2siOiI0MGY3ODgzNW...
+
+ >>> ONE-COMMAND LAUNCH FOR CLIENT:
+ xmastunnel client --token "xmas://..."
+========================================================================
 ```
 
 ---
 
-### نصب دستی (Manual Installation):
+### Step 2: Connect the Client & Start SOCKS5 Proxy
 
-این پروژه از **Python 3.11+** استفاده می‌کند. وابستگی‌ها را با دستور زیر نصب کنید:
+On your client machine (Windows or Linux), launch the client using the generated token:
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
----
-
-## اسکریپت‌های اجرای سریع (Quick Launch Scripts)
-
-### در اوبونتو / لینوکس (Ubuntu):
-
-**راه‌اندازی سرور:**
-```bash
-chmod +x scripts/*.sh
-./scripts/server_ubuntu.sh [HOST] [PORT] [KEY]
-# مثال بدون پارامتر (پورت ۸۴۴۳ با تولید خودکار کلید):
-./scripts/server_ubuntu.sh
-```
-
-**اجرای کلاینت:**
-```bash
-./scripts/client_ubuntu.sh [SERVER_IP] [PORT] [KEY]
-# مثال با دریافت تعاملی آدرس و کلید:
-./scripts/client_ubuntu.sh
-```
-
-### در ویندوز (Windows):
-
-**راه‌اندازی سرور (PowerShell یا دوبار کلیک روی `server_windows.bat`):**
+#### On Windows (PowerShell):
 ```powershell
-.\scripts\server_windows.ps1 -Port 8443
+powershell -ExecutionPolicy Bypass -File .\scripts\client_windows.ps1 -Token "xmas://<TOKEN>"
 ```
 
-**اجرای کلاینت (PowerShell یا دوبار کلیک روی `client_windows.bat`):**
-```powershell
-.\scripts\client_windows.ps1 -Server 127.0.0.1 -Port 8443 -Key "<SERVER_KEY>" -XmasProbe
+#### On Linux / Ubuntu:
+```bash
+xmastunnel-client "xmas://<TOKEN>"
+```
+
+#### Direct Python Execution:
+```bash
+python -m xmastunnel client --token "xmas://<TOKEN>"
+```
+
+Upon connection, the client establishes the encrypted tunnel and activates the local SOCKS5 proxy:
+```text
+[+] SOCKS5 PROXY ACTIVE ON: 127.0.0.1:10829
+[+] All client traffic is multiplexed & encrypted via AES-256-GCM
+[+] Configure browser / Telegram / apps to SOCKS5 127.0.0.1:10829
+[*] Tunnel active. Press Ctrl+C to stop.
 ```
 
 ---
 
-## راهنمای استفاده (Usage Guide)
+## 5. Using the SOCKS5 Proxy
 
-### ۱. تولید کلید تصادفی ۲۵۶ بیتی (Generate PSK)
+Once the client is running, configure your browser, operating system, or application to route traffic through the tunnel:
 
+- **Proxy Protocol:** `SOCKS5`
+- **Host / IP:** `127.0.0.1`
+- **Port:** `10829`
+
+### Terminal Testing:
+Verify external routing using `curl`:
 ```bash
-python -m xmastunnel gen-key
+curl -x socks5h://127.0.0.1:10829 https://api.ipify.org
 ```
+*(The returned IP address will be your remote tunnel server's public IP).*
 
-### ۲. راه‌اندازی سرور (Start Server)
+---
 
-با اجرای سرور بدون کلید، یک کلید تصادفی امن تولید و در ترمینال نمایش داده می‌شود:
+## 6. TCP Flag Inspection & Packet Engine
 
-```bash
-python -m xmastunnel server --host 0.0.0.0 --port 8443
-```
-
-یا با تعیین کلید اختصاصی:
+XmasTunnel includes an independent raw packet analysis engine to inspect and craft arbitrary TCP control flag combinations:
 
 ```bash
-python -m xmastunnel server -p 8443 --key "65b0e79f33883a727ffd1a51ed12901a24aa1c2aea466f820bc42516110e2f2b"
-```
-
-### ۳. اتصال کلاینت (Connect Client)
-
-**حالت ارسال پیام متنی یک‌باره:**
-```bash
-python -m xmastunnel client -s 127.0.0.1 -p 8443 --key "<SERVER_KEY>" --send "Hello Secure Tunnel"
-```
-
-**بررسی تاخیر ارتباط (Ping/Pong):**
-```bash
-python -m xmastunnel client -s 127.0.0.1 -p 8443 --key "<SERVER_KEY>" --ping 5
-```
-
-**حالت تعاملی دوطرفه:**
-```bash
-python -m xmastunnel client -s 127.0.0.1 -p 8443 --key "<SERVER_KEY>"
-```
-
-### ۴. آزمایش و بررسی فلگ‌های سطح پایین TCP (Packet Engine)
-
-**اجرای ماتریس آزمایشی تمام پروفایل‌ها (Xmas Tree, SYN, NULL, ALL FLAGS):**
-```bash
+# Run a full matrix test across all standard & anomalous profiles
 python -m xmastunnel test-flags --matrix
+
+# Test a custom flag combination (e.g. FIN, URG, PSH - Xmas Tree scan)
+python -m xmastunnel test-flags --flags "FIN,URG,PSH" --dst-ip 127.0.0.1 --dst-port 8443
 ```
 
-**ساخت و آزمایش بسته دلخواه با ترکیب فلگ‌ها:**
-```bash
-python -m xmastunnel test-flags --flags "FIN,URG,PSH" --src-port 54321 --dst-port 8443
-```
+### Supported Flag Profiles:
+- **`XMAS_TREE` (`FIN|PSH|URG`):** The classic Christmas tree packet with push, urgent, and fin flags enabled.
+- **`SYN_PROBE` (`SYN`):** Standard connection initiation probe.
+- **`SYN_ACK` (`SYN|ACK`):** Server connection confirmation response.
+- **`NULL_FLAGS` (`NONE`):** Zero flags set; tests stack behavior against undefined states.
+- **`ALL_FLAGS` (`FIN|SYN|RST|PSH|ACK|URG|ECE|CWR`):** Maximum stress probe testing firewall rule sets.
 
 ---
 
-## گزارش تست‌ها (Test Suite Report)
+## 7. Verification & Test Suite
 
-تمام ۲۱ آزمون در فایل‌های زیر بدون خطا پاس شده‌اند:
+The project includes 22 unit, cryptographic, protocol, and end-to-end integration tests:
 
 ```bash
 pytest tests -v
 ```
 
-```
-tests/test_crypto.py::test_aes_gcm_encrypt_decrypt_roundtrip PASSED
-tests/test_crypto.py::test_aes_gcm_tamper_detection PASSED
-tests/test_crypto.py::test_psk_generation_and_detection PASSED
-tests/test_crypto.py::test_kdf_derivation_deterministic PASSED
-tests/test_crypto.py::test_nonce_manager_monotonic PASSED
-tests/test_crypto.py::test_replay_protection_window PASSED
-tests/test_integration.py::test_full_tunnel_integration_and_rekey PASSED
-tests/test_integration.py::test_client_wrong_psk_rejected PASSED
-tests/test_packet_engine.py::test_flag_parsing_and_str PASSED
-tests/test_packet_engine.py::test_checksum_algorithm PASSED
-tests/test_packet_engine.py::test_raw_tcp_packet_craft_and_parse PASSED
-tests/test_packet_engine.py::test_flag_matrix_execution PASSED
-tests/test_protocol.py::test_frame_pack_unpack_roundtrip PASSED
-tests/test_protocol.py::test_frame_parser_fragmentation PASSED
-tests/test_protocol.py::test_frame_parser_multiple_frames_in_buffer PASSED
-tests/test_protocol.py::test_protocol_state_machine_valid_and_invalid PASSED
-tests/test_session.py::test_handshake_flow_success PASSED
-tests/test_session.py::test_handshake_bad_psk_failure PASSED
-tests/test_session.py::test_session_data_encryption_and_anti_replay PASSED
-tests/test_session.py::test_session_manager PASSED
-tests/test_transport.py::test_tcp_transport_streaming PASSED
+```text
+tests/test_crypto.py::test_aes_gcm_encrypt_decrypt_roundtrip PASSED      [  4%]
+tests/test_crypto.py::test_aes_gcm_tamper_detection PASSED               [  9%]
+tests/test_crypto.py::test_psk_generation_and_detection PASSED           [ 13%]
+tests/test_crypto.py::test_kdf_derivation_deterministic PASSED           [ 18%]
+tests/test_crypto.py::test_nonce_manager_monotonic PASSED                [ 22%]
+tests/test_crypto.py::test_replay_protection_window PASSED               [ 27%]
+tests/test_integration.py::test_full_tunnel_integration_and_rekey PASSED [ 31%]
+tests/test_integration.py::test_client_wrong_psk_rejected PASSED         [ 36%]
+tests/test_packet_engine.py::test_flag_parsing_and_str PASSED            [ 40%]
+tests/test_packet_engine.py::test_checksum_algorithm PASSED              [ 45%]
+tests/test_packet_engine.py::test_raw_tcp_packet_craft_and_parse PASSED  [ 50%]
+tests/test_packet_engine.py::test_flag_matrix_execution PASSED           [ 54%]
+tests/test_protocol.py::test_frame_pack_unpack_roundtrip PASSED          [ 59%]
+tests/test_protocol.py::test_frame_parser_fragmentation PASSED           [ 63%]
+tests/test_protocol.py::test_frame_parser_multiple_frames_in_buffer PASSED [ 68%]
+tests/test_protocol.py::test_protocol_state_machine_valid_and_invalid PASSED [ 72%]
+tests/test_session.py::test_handshake_flow_success PASSED                [ 77%]
+tests/test_session.py::test_handshake_bad_psk_failure PASSED             [ 81%]
+tests/test_session.py::test_session_data_encryption_and_anti_replay PASSED [ 86%]
+tests/test_session.py::test_session_manager PASSED                       [ 90%]
+tests/test_socks.py::test_socks5_proxy_over_xmastunnel PASSED            [ 95%]
+tests/test_transport.py::test_tcp_transport_streaming PASSED             [100%]
 
-============================= 21 passed in 0.65s ==============================
+============================= 22 passed in 1.25s ==============================
 ```
+
+---
+
+## 8. Security & Cryptographic Standards
+
+- **Cipher:** AES-256 in Galois/Counter Mode (GCM) with 128-bit authentication tags.
+- **Key Derivation:** HKDF-SHA256 for high-entropy keys, PBKDF2-HMAC-SHA256 (300,000 iterations) for passphrases.
+- **Replay Protection:** 64-frame sliding window matching RFC 6479.
+- **Nonce Integrity:** Directional salt (4 bytes) concatenated with a monotonic 64-bit integer counter. Nonce values never repeat within a session key lifespan.
+- **Zero Log Leakage:** Built-in regex filters redact keys, passphrases, and tokens from all log output.

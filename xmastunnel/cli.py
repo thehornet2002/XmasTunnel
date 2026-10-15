@@ -69,7 +69,7 @@ def cmd_server(args: argparse.Namespace) -> None:
 
         # 3. Two-Part Flags Configuration
         print("\n3. Configure TCP Flags in Two Parts:")
-        print("   --- [Part A: Server TX Flags (فلگ‌های ارسالی سرور)] ---")
+        print("   --- [Part A: Server TX Flags (Emitted by Server)] ---")
         print("   [1] SYN|ACK (Normal Handshake Response - Default)")
         print("   [2] RST|ACK (Connection Reset/Probe Response)")
         print("   [3] Xmas Tree (FIN|PSH|URG)")
@@ -87,7 +87,7 @@ def cmd_server(args: argparse.Namespace) -> None:
         else:
             server_flags = "SYN_ACK"
 
-        print("\n   --- [Part B: Client TX Flags (فلگ‌های ارسالی کلاینت)] ---")
+        print("\n   --- [Part B: Client TX Flags (Emitted by Client)] ---")
         print("   [1] Xmas Tree (FIN|PSH|URG) - Classic Christmas Scan (Default)")
         print("   [2] SYN Probe (SYN)")
         print("   [3] All Flags (FIN|SYN|RST|PSH|ACK|URG|ECE|CWR)")
