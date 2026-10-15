@@ -8,5 +8,6 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 .venv\Scripts\python.exe -m pip install -r requirements.txt --quiet
-.venv\Scripts\python.exe -m xmastunnel server --host 0.0.0.0 -p 8443 %*
+.venv\Scripts\python.exe -m pip install -e . --quiet
+.venv\Scripts\python.exe -m xmastunnel server --interactive %*
 pause

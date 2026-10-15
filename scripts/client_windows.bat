@@ -8,5 +8,7 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 .venv\Scripts\python.exe -m pip install -r requirements.txt --quiet
+.venv\Scripts\python.exe -m pip install -e . --quiet
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0client_windows.ps1" %*
+pause

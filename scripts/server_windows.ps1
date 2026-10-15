@@ -1,8 +1,9 @@
 # XmasTunnel - Windows Server Setup & Launcher (PowerShell)
 param (
     [string]$HostAddress = "0.0.0.0",
-    [int]$Port = 8443,
-    [string]$Key = ""
+    [int]$Port = 0,
+    [string]$Key = "",
+    [switch]$Interactive = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,14 +29,20 @@ if (-not (Test-Path -LiteralPath $VenvPython)) {
 }
 
 Write-Host "[*] Updating dependencies..." -ForegroundColor Yellow
-& "$VenvPython" -m pip install -U pip --quiet
+& "$VenvPython" -m pip install -U pip setuptools --quiet
 & "$VenvPython" -m pip install -r requirements.txt --quiet
+& "$VenvPython" -m pip install -e . --quiet
 
 # 3. Launch Server
-Write-Host "[*] Starting XmasTunnel Server on ${HostAddress}:${Port}..." -ForegroundColor Green
-$ArgsList = @("-m", "xmastunnel", "server", "--host", $HostAddress, "-p", $Port)
-if ($Key) {
-    $ArgsList += @("--key", $Key)
+if ($Interactive -or ($Port -eq 0 -and [string]::IsNullOrEmpty($Key))) {
+    # Launch interactive wizard
+    & "$VenvPython" -m xmastunnel server --interactive
+} else {
+    $EffectivePort = if ($Port -eq 0) { 8443 } else { $Port }
+    Write-Host "[*] Starting XmasTunnel Server on ${HostAddress}:${EffectivePort}..." -ForegroundColor Green
+    $ArgsList = @("-m", "xmastunnel", "server", "--host", $HostAddress, "-p", $EffectivePort)
+    if ($Key) {
+        $ArgsList += @("--key", $Key)
+    }
+    & "$VenvPython" @ArgsList
 }
-
-& "$VenvPython" @ArgsList

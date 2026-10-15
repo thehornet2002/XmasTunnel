@@ -1,5 +1,6 @@
 # XmasTunnel - Windows Client Setup & Launcher (PowerShell)
 param (
+    [string]$Token = "",
     [string]$Server = "",
     [int]$Port = 8443,
     [string]$Key = "",
@@ -29,22 +30,31 @@ if (-not (Test-Path -LiteralPath $VenvPython)) {
 }
 
 Write-Host "[*] Updating dependencies..." -ForegroundColor Yellow
-& "$VenvPython" -m pip install -U pip --quiet
+& "$VenvPython" -m pip install -U pip setuptools --quiet
 & "$VenvPython" -m pip install -r requirements.txt --quiet
+& "$VenvPython" -m pip install -e . --quiet
 
-# 3. Interactive inputs if omitted
-if (-not $Server) {
-    $Server = Read-Host "Enter Server IP Address [default: 127.0.0.1]"
-    if (-not $Server) { $Server = "127.0.0.1" }
+# 3. Handle Token or Interactive Inputs
+if ($Token -or ($Server -match "^xmas://")) {
+    $EffectiveToken = if ($Token) { $Token } else { $Server }
+    Write-Host "[*] Connecting using Client Configuration Token..." -ForegroundColor Green
+    & "$VenvPython" -m xmastunnel client --token "$EffectiveToken"
+    exit 0
 }
 
-if (-not $Key) {
+if (-not $Server -and -not $Key) {
+    $InputVal = Read-Host "Enter Client Config Token (xmas://...) or Server IP"
+    if ($InputVal -match "^xmas://") {
+        Write-Host "[*] Connecting using Client Configuration Token..." -ForegroundColor Green
+        & "$VenvPython" -m xmastunnel client --token "$InputVal"
+        exit 0
+    }
+    $Server = if ($InputVal) { $InputVal } else { "127.0.0.1" }
+    $PortStr = Read-Host "Enter Server Port [default: 8443]"
+    if ($PortStr) { $Port = [int]$PortStr }
     $Key = Read-Host "Enter Pre-Shared Key (PSK)"
-}
-
-if (-not $XmasProbe) {
-    $ProbeChoice = Read-Host "Enable Xmas Tree probe before connection? (y/N)"
-    if ($ProbeChoice -match "^[Yy]") {
+    $ProbeChoice = Read-Host "Enable Xmas Tree probe before connection? (Y/n)"
+    if ($ProbeChoice -notmatch "^[Nn]") {
         $XmasProbe = $true
     }
 }
