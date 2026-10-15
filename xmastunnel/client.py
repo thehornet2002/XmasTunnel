@@ -62,7 +62,6 @@ class TunnelClient:
 
     def connect(self) -> None:
         """Connects to remote server and executes cryptographic handshake."""
-        self.send_raw_probe(count=2)
         self.logger.info(f"Connecting to {self.config.remote_host}:{self.config.remote_port}...")
         if getattr(self.config, "raw_mode", False):
             from .transport.raw_transport import RawTunnelConnection

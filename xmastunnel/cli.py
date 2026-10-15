@@ -239,11 +239,10 @@ def cmd_client(args: argparse.Namespace) -> None:
             verbose=args.verbose,
         )
 
-    # 3. Test flags if specified or --xmas-probe
-    effective_client_flags = "XMAS_TREE" if getattr(args, "xmas_probe", False) else client_flags
-    if effective_client_flags and effective_client_flags != "NONE":
+    # 3. Test flags probe (for standard TCP mode when probe explicitly requested)
+    if not raw_mode and getattr(args, "xmas_probe", False):
         try:
-            parsed_c_flags = parse_flags(effective_client_flags)
+            parsed_c_flags = parse_flags(client_flags if client_flags and client_flags != "NONE" else "XMAS_TREE")
             print(f"[*] Dispatching Client TCP Flag Probe [{flags_to_str(parsed_c_flags)}] to {config.remote_host}:{config.remote_port}...")
             engine = RawPacketEngine(fallback_to_loopback=True)
             from .protocol.frame import Frame, FrameType
@@ -257,9 +256,6 @@ def cmd_client(args: argparse.Namespace) -> None:
             )
             probe_res = engine.send_packet(probe_pkt, simulate=False)
             print(f"[+] Client Probe Status: {probe_res['status']} | Checksum Valid: {probe_res['checksum_valid']}")
-            if server_flags and server_flags != "NONE":
-                parsed_s_flags = parse_flags(server_flags)
-                print(f"[+] Server Flag Response Profile: [{flags_to_str(parsed_s_flags)}]")
         except Exception as e:
             print(f"[!] Warning during flag test: {e}")
 

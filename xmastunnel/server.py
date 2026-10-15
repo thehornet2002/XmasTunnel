@@ -177,10 +177,16 @@ class TunnelServer:
     def _handle_client(self, conn: TCPConnection) -> None:
         session: Optional[TunnelSession] = None
         try:
-            # 1. Wait for HANDSHAKE_INIT
-            init_frame = conn.recv_frame(timeout=10.0)
-            if not init_frame or init_frame.frame_type != FrameType.HANDSHAKE_INIT:
-                self.logger.warning("Invalid or missing HANDSHAKE_INIT from client")
+            # 1. Wait for HANDSHAKE_INIT (filtering out any stray pre-probe frames)
+            init_frame = None
+            start_wait = time.time()
+            while time.time() - start_wait < 10.0:
+                f = conn.recv_frame(timeout=2.0)
+                if f and f.frame_type == FrameType.HANDSHAKE_INIT:
+                    init_frame = f
+                    break
+            if not init_frame:
+                self.logger.warning("Timeout or missing HANDSHAKE_INIT from client")
                 return
 
             # Create server session
