@@ -1,5 +1,6 @@
 import socket
 import select
+import threading
 import time
 from typing import Optional, Tuple
 from ..protocol.frame import Frame, FrameParser, HEADER_SIZE, ProtocolError
@@ -65,6 +66,7 @@ class TCPConnection:
         self.rate_limiter = RateLimiter(rate_limit_bytes_per_sec)
         self.parser = FrameParser()
         self._closed = False
+        self._send_lock = threading.Lock()
 
         # Configure socket options
         try:
@@ -91,23 +93,24 @@ class TCPConnection:
 
     def send_frame(self, frame: Frame) -> None:
         """Packs and transmits a complete frame over the TCP stream."""
-        if self._closed:
-            raise TransportError("Cannot send on closed connection")
+        with self._send_lock:
+            if self._closed:
+                raise TransportError("Cannot send on closed connection")
 
-        data = frame.pack()
-        self.rate_limiter.consume(len(data))
-        total_sent = 0
-        try:
-            while total_sent < len(data):
-                sent = self.sock.send(data[total_sent:])
-                if sent == 0:
-                    raise ConnectionClosedError("Socket connection lost during send")
-                total_sent += sent
-        except (socket.timeout, TimeoutError) as e:
-            raise ConnectionTimeoutError("Send timed out") from e
-        except OSError as e:
-            self._closed = True
-            raise TransportError(f"Socket send failed: {e}") from e
+            data = frame.pack()
+            self.rate_limiter.consume(len(data))
+            total_sent = 0
+            try:
+                while total_sent < len(data):
+                    sent = self.sock.send(data[total_sent:])
+                    if sent == 0:
+                        raise ConnectionClosedError("Socket connection lost during send")
+                    total_sent += sent
+            except (socket.timeout, TimeoutError) as e:
+                raise ConnectionTimeoutError("Send timed out") from e
+            except OSError as e:
+                self._closed = True
+                raise TransportError(f"Socket send failed: {e}") from e
 
     def recv_frame(self, timeout: Optional[float] = None) -> Optional[Frame]:
         """

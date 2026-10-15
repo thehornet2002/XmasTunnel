@@ -1,6 +1,7 @@
 import hmac
 import hashlib
 import secrets
+import threading
 import time
 from typing import Optional, Tuple
 from ..crypto.aes_gcm import AES256GCMCipher, CryptoError, DecryptionFailedError
@@ -57,6 +58,7 @@ class TunnelSession:
         self.send_nonce_mgr: Optional[NonceManager] = None
         self.recv_nonce_mgr: Optional[NonceManager] = None
         self.replay_window = ReplayProtectionWindow(window_size=64)
+        self._encrypt_lock = threading.Lock()
 
         # Statistics
         self.created_at = time.time()
@@ -223,37 +225,36 @@ class TunnelSession:
         Encrypts plaintext with AES-256-GCM using directional cipher & monotonic nonce.
         Header is packed and bound as Associated Authenticated Data (AAD).
         """
-        if not self.is_established:
-            raise ProtocolError(f"Cannot encrypt frame in non-established state {self.state}")
-        if not self.cipher_send or not self.send_nonce_mgr:
-            raise CryptoError("Ciphers not initialized")
+        with self._encrypt_lock:
+            if not self.is_established:
+                raise ProtocolError(f"Cannot encrypt frame in non-established state {self.state}")
+            if not self.cipher_send or not self.send_nonce_mgr:
+                raise CryptoError("Ciphers not initialized")
 
-        nonce, seq = self.send_nonce_mgr.next_nonce()
+            nonce, seq = self.send_nonce_mgr.next_nonce()
 
-        # Placeholder frame to generate exact 24-byte header for AAD
-        # Note: payload length in header will be len(plaintext) + 16 (GCM tag size)
-        expected_payload_len = len(plaintext) + AES256GCMCipher.TAG_SIZE
-        dummy_frame = Frame(
-            frame_type=frame_type,
-            session_id=self.session_id,
-            seq=seq,
-            payload=b"\x00" * expected_payload_len,
-        )
-        aad = dummy_frame.pack_header()
+            expected_payload_len = len(plaintext) + AES256GCMCipher.TAG_SIZE
+            dummy_frame = Frame(
+                frame_type=frame_type,
+                session_id=self.session_id,
+                seq=seq,
+                payload=b"\x00" * expected_payload_len,
+            )
+            aad = dummy_frame.pack_header()
 
-        ciphertext_with_tag = self.cipher_send.encrypt(nonce, plaintext, associated_data=aad)
+            ciphertext_with_tag = self.cipher_send.encrypt(nonce, plaintext, associated_data=aad)
 
-        frame = Frame(
-            frame_type=frame_type,
-            session_id=self.session_id,
-            seq=seq,
-            payload=ciphertext_with_tag,
-        )
+            frame = Frame(
+                frame_type=frame_type,
+                session_id=self.session_id,
+                seq=seq,
+                payload=ciphertext_with_tag,
+            )
 
-        self.bytes_sent += len(frame.payload)
-        self.frames_sent += 1
-        self.last_active_at = time.time()
-        return frame
+            self.bytes_sent += len(frame.payload)
+            self.frames_sent += 1
+            self.last_active_at = time.time()
+            return frame
 
     def decrypt_frame(self, frame: Frame) -> bytes:
         """

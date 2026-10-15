@@ -4,6 +4,7 @@ param (
     [string]$Server = "",
     [int]$Port = 8443,
     [string]$Key = "",
+    [int]$SocksPort = 10829,
     [switch]$XmasProbe = $false
 )
 
@@ -37,16 +38,16 @@ Write-Host "[*] Updating dependencies..." -ForegroundColor Yellow
 # 3. Handle Token or Interactive Inputs
 if ($Token -or ($Server -match "^xmas://")) {
     $EffectiveToken = if ($Token) { $Token } else { $Server }
-    Write-Host "[*] Connecting using Client Configuration Token..." -ForegroundColor Green
-    & "$VenvPython" -m xmastunnel client --token "$EffectiveToken"
+    Write-Host "[*] Connecting using Client Configuration Token with SOCKS5 on 127.0.0.1:${SocksPort}..." -ForegroundColor Green
+    & "$VenvPython" -m xmastunnel client --token "$EffectiveToken" --socks $SocksPort
     exit 0
 }
 
 if (-not $Server -and -not $Key) {
     $InputVal = Read-Host "Enter Client Config Token (xmas://...) or Server IP"
     if ($InputVal -match "^xmas://") {
-        Write-Host "[*] Connecting using Client Configuration Token..." -ForegroundColor Green
-        & "$VenvPython" -m xmastunnel client --token "$InputVal"
+        Write-Host "[*] Connecting using Client Configuration Token with SOCKS5 on 127.0.0.1:${SocksPort}..." -ForegroundColor Green
+        & "$VenvPython" -m xmastunnel client --token "$InputVal" --socks $SocksPort
         exit 0
     }
     $Server = if ($InputVal) { $InputVal } else { "127.0.0.1" }
@@ -59,8 +60,8 @@ if (-not $Server -and -not $Key) {
     }
 }
 
-Write-Host "[*] Connecting to ${Server}:${Port}..." -ForegroundColor Green
-$ArgsList = @("-m", "xmastunnel", "client", "-s", $Server, "-p", $Port, "--key", $Key)
+Write-Host "[*] Connecting to ${Server}:${Port} with SOCKS5 proxy on 127.0.0.1:${SocksPort}..." -ForegroundColor Green
+$ArgsList = @("-m", "xmastunnel", "client", "-s", $Server, "-p", $Port, "--key", $Key, "--socks", $SocksPort)
 if ($XmasProbe) {
     $ArgsList += "--xmas-probe"
 }

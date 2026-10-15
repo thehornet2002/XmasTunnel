@@ -16,6 +16,10 @@ class FrameType(enum.IntEnum):
     HANDSHAKE_AUTH = 0x03
     HANDSHAKE_CONFIRM = 0x04
     DATA = 0x10
+    STREAM_OPEN = 0x11       # Request remote server connect to dst:port
+    STREAM_DATA = 0x12       # Multiplexed TCP stream payload
+    STREAM_CLOSE = 0x13      # Clean stream teardown
+    STREAM_RESET = 0x14      # Error or abort stream
     PING = 0x20
     PONG = 0x21
     REKEY_REQUEST = 0x30

@@ -1,5 +1,6 @@
 import logging
 import socket
+import struct
 import threading
 from typing import Callable, Dict, Optional
 from .config.config import ServerConfig
@@ -137,6 +138,34 @@ class TunnelServer:
                 f"Session 0x{session.session_id:016X} ESTABLISHED with {conn.peer_address} (AES-256-GCM)"
             )
 
+            outbound_sockets: Dict[int, socket.socket] = {}
+            outbound_lock = threading.Lock()
+
+            def _relay_outbound_to_tunnel(sid: int, out_sock: socket.socket) -> None:
+                try:
+                    while self._running and session.is_established:
+                        chunk = out_sock.recv(32768)
+                        if not chunk:
+                            break
+                        stream_payload = struct.pack(">I", sid) + chunk
+                        out_f = session.encrypt_frame(FrameType.STREAM_DATA, stream_payload)
+                        conn.send_frame(out_f)
+                except Exception:
+                    pass
+                finally:
+                    with outbound_lock:
+                        outbound_sockets.pop(sid, None)
+                    try:
+                        out_sock.close()
+                    except OSError:
+                        pass
+                    try:
+                        if session.is_established:
+                            close_f = session.encrypt_frame(FrameType.STREAM_CLOSE, struct.pack(">I", sid))
+                            conn.send_frame(close_f)
+                    except Exception:
+                        pass
+
             # 5. Established session loop
             while self._running and session.is_established:
                 frame = conn.recv_frame(timeout=self.config.idle_timeout)
@@ -144,7 +173,63 @@ class TunnelServer:
                     self.logger.info(f"Client {conn.peer_address} disconnected cleanly")
                     break
 
-                if frame.frame_type == FrameType.DATA:
+                if frame.frame_type == FrameType.STREAM_OPEN:
+                    plaintext = session.decrypt_frame(frame)
+                    if len(plaintext) >= 7:
+                        stream_id, host_len, dst_port = struct.unpack(">IBH", plaintext[:7])
+                        dst_host = plaintext[7:7+host_len].decode("utf-8", errors="replace")
+                        self.logger.info(f"[Session 0x{session.session_id:016X}] SOCKS5 Stream #{stream_id} -> {dst_host}:{dst_port}")
+                        try:
+                            out_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            out_sock.settimeout(10.0)
+                            out_sock.connect((dst_host, dst_port))
+                            out_sock.settimeout(None)
+                            with outbound_lock:
+                                outbound_sockets[stream_id] = out_sock
+                            t_out = threading.Thread(
+                                target=_relay_outbound_to_tunnel,
+                                args=(stream_id, out_sock),
+                                daemon=True,
+                                name=f"SOCKS5-Out-{stream_id}",
+                            )
+                            t_out.start()
+                        except Exception as e:
+                            self.logger.warning(f"Failed to connect to {dst_host}:{dst_port}: {e}")
+                            rst_payload = struct.pack(">I", stream_id)
+                            rst_f = session.encrypt_frame(FrameType.STREAM_RESET, rst_payload)
+                            conn.send_frame(rst_f)
+
+                elif frame.frame_type == FrameType.STREAM_DATA:
+                    plaintext = session.decrypt_frame(frame)
+                    if len(plaintext) > 4:
+                        stream_id = struct.unpack(">I", plaintext[:4])[0]
+                        chunk = plaintext[4:]
+                        with outbound_lock:
+                            s_sock = outbound_sockets.get(stream_id)
+                        if s_sock:
+                            try:
+                                s_sock.sendall(chunk)
+                            except OSError:
+                                with outbound_lock:
+                                    outbound_sockets.pop(stream_id, None)
+                                try:
+                                    s_sock.close()
+                                except OSError:
+                                    pass
+
+                elif frame.frame_type == FrameType.STREAM_CLOSE or frame.frame_type == FrameType.STREAM_RESET:
+                    plaintext = session.decrypt_frame(frame)
+                    if len(plaintext) >= 4:
+                        stream_id = struct.unpack(">I", plaintext[:4])[0]
+                        with outbound_lock:
+                            s_sock = outbound_sockets.pop(stream_id, None)
+                        if s_sock:
+                            try:
+                                s_sock.close()
+                            except OSError:
+                                pass
+
+                elif frame.frame_type == FrameType.DATA:
                     plaintext = session.decrypt_frame(frame)
                     self.logger.debug(f"Received {len(plaintext)} plaintext bytes from session 0x{session.session_id:016X}")
                     reply = self.on_data_received(session, plaintext)
@@ -174,6 +259,16 @@ class TunnelServer:
         except Exception as e:
             self.logger.exception(f"Unexpected error handling client: {e}")
         finally:
+            # Clean up any open outbound sockets
+            try:
+                for s in list(outbound_sockets.values()):
+                    try:
+                        s.close()
+                    except OSError:
+                        pass
+                outbound_sockets.clear()
+            except Exception:
+                pass
             if session:
                 with self._lock:
                     self._connections.pop(session.session_id, None)

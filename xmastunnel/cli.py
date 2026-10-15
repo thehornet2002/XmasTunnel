@@ -251,7 +251,7 @@ def cmd_client(args: argparse.Namespace) -> None:
                 print(f"[*] Ping #{i+1}: RTT = {rtt:.2f} ms")
                 time.sleep(0.5)
 
-        if args.send:
+        elif args.send:
             payload = args.send.encode("utf-8")
             print(f"[*] Sending: {args.send}")
             client.send_data(payload)
@@ -261,16 +261,17 @@ def cmd_client(args: argparse.Namespace) -> None:
             else:
                 print("[-] No response received.")
 
-        if not args.ping and not args.send:
-            print("[+] Tunnel is open. Type text and press Enter to send over encrypted tunnel (Ctrl+C to quit):")
-            while True:
-                line = input("> ")
-                if not line:
-                    continue
-                client.send_data(line.encode("utf-8"))
-                resp = client.recv_data(timeout=5.0)
-                if resp:
-                    print(f"< {resp.decode('utf-8', errors='replace')}")
+        else:
+            socks_port = args.socks if args.socks is not None else 10829
+            client.start_socks_proxy(listen_host=args.socks_host, listen_port=socks_port)
+            print("\n" + "=" * 68)
+            print(f" [+] SOCKS5 PROXY ACTIVE ON: {args.socks_host}:{socks_port}")
+            print(f" [+] All client traffic is multiplexed & encrypted via AES-256-GCM")
+            print(f" [+] Configure browser / Telegram / apps to SOCKS5 {args.socks_host}:{socks_port}")
+            print("=" * 68)
+            print("[*] Tunnel active. Press Ctrl+C to stop.\n")
+            while client.is_connected:
+                time.sleep(1.0)
     except KeyboardInterrupt:
         print("\n[*] Exiting...")
     finally:
@@ -356,6 +357,8 @@ def main() -> None:
     # client command
     p_cli = subparsers.add_parser("client", help="Start the tunnel client")
     p_cli.add_argument("-t", "--token", help="Client configuration token (xmas://...) containing IP, port, key and flags")
+    p_cli.add_argument("--socks", type=int, nargs="?", const=10829, default=None, metavar="PORT", help="Run local SOCKS5 proxy server (default port: 10829)")
+    p_cli.add_argument("--socks-host", default="127.0.0.1", help="SOCKS5 listen host (default: 127.0.0.1)")
     p_cli.add_argument("-s", "--server", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
     p_cli.add_argument("-p", "--port", type=int, default=8443, help="Server port (default: 8443)")
     p_cli.add_argument("--key", default="", help="Pre-shared key")

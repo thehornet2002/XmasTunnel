@@ -1,5 +1,7 @@
 import logging
 import secrets
+import struct
+import threading
 import time
 from typing import Optional
 from .config.config import ClientConfig
@@ -154,8 +156,93 @@ class TunnelClient:
         self.session.handle_rekey_ack(ack_frame)
         self.logger.info("Session keys rotated successfully.")
 
+    def start_socks_proxy(self, listen_host: str = "127.0.0.1", listen_port: int = 10829) -> None:
+        """Starts local SOCKS5 proxy and multiplexes connections over the encrypted tunnel."""
+        if not self.is_connected:
+            raise TransportError("Cannot start SOCKS5 proxy: tunnel is not connected")
+
+        from .socks.socks_server import SOCKS5ProxyServer
+
+        def on_open_stream(stream_id: int, dst_host: str, dst_port: int) -> bool:
+            try:
+                host_bytes = dst_host.encode("utf-8")
+                payload = struct.pack(">IBH", stream_id, len(host_bytes), dst_port) + host_bytes
+                f = self.session.encrypt_frame(FrameType.STREAM_OPEN, payload)
+                self.conn.send_frame(f)
+                return True
+            except Exception as e:
+                self.logger.warning(f"Failed to send STREAM_OPEN for stream #{stream_id}: {e}")
+                return False
+
+        def on_stream_data(stream_id: int, chunk: bytes) -> None:
+            try:
+                payload = struct.pack(">I", stream_id) + chunk
+                f = self.session.encrypt_frame(FrameType.STREAM_DATA, payload)
+                self.conn.send_frame(f)
+            except Exception as e:
+                self.logger.debug(f"Failed to send STREAM_DATA for stream #{stream_id}: {e}")
+
+        def on_close_stream(stream_id: int) -> None:
+            try:
+                payload = struct.pack(">I", stream_id)
+                f = self.session.encrypt_frame(FrameType.STREAM_CLOSE, payload)
+                self.conn.send_frame(f)
+            except Exception:
+                pass
+
+        self.socks_proxy = SOCKS5ProxyServer(
+            listen_host=listen_host,
+            listen_port=listen_port,
+            on_open_stream=on_open_stream,
+            on_stream_data=on_stream_data,
+            on_close_stream=on_close_stream,
+            logger=self.logger,
+        )
+        self.socks_proxy.start()
+
+        self._socks_rx_thread = threading.Thread(
+            target=self._socks_rx_loop, daemon=True, name="SOCKS5-Tunnel-RX"
+        )
+        self._socks_rx_thread.start()
+
+    def _socks_rx_loop(self) -> None:
+        try:
+            while self.is_connected:
+                frame = self.conn.recv_frame(timeout=60.0)
+                if frame is None:
+                    break
+                if frame.frame_type == FrameType.STREAM_DATA:
+                    plaintext = self.session.decrypt_frame(frame)
+                    if len(plaintext) > 4:
+                        stream_id = struct.unpack(">I", plaintext[:4])[0]
+                        data = plaintext[4:]
+                        if hasattr(self, "socks_proxy"):
+                            self.socks_proxy.deliver_remote_data(stream_id, data)
+                elif frame.frame_type == FrameType.STREAM_CLOSE or frame.frame_type == FrameType.STREAM_RESET:
+                    plaintext = self.session.decrypt_frame(frame)
+                    if len(plaintext) >= 4:
+                        stream_id = struct.unpack(">I", plaintext[:4])[0]
+                        if hasattr(self, "socks_proxy"):
+                            self.socks_proxy.close_stream(stream_id)
+                elif frame.frame_type == FrameType.PING:
+                    self.session.decrypt_frame(frame)
+                    pong = self.session.encrypt_frame(FrameType.PONG, b"PONG")
+                    self.conn.send_frame(pong)
+                elif frame.frame_type == FrameType.TEARDOWN:
+                    break
+        except Exception as e:
+            self.logger.debug(f"Tunnel RX loop ended: {e}")
+        finally:
+            if hasattr(self, "socks_proxy"):
+                self.socks_proxy.stop()
+
     def close(self) -> None:
         """Gracefully terminates tunnel."""
+        if hasattr(self, "socks_proxy"):
+            try:
+                self.socks_proxy.stop()
+            except Exception:
+                pass
         if self.session and self.session.is_established and self.conn:
             try:
                 teardown = self.session.create_teardown()
