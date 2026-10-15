@@ -40,8 +40,29 @@ class TunnelClient:
     def is_connected(self) -> bool:
         return self.conn is not None and self.session is not None and self.session.is_established
 
+    def send_raw_probe(self, count: int = 2) -> None:
+        """Sends live raw TCP packets with configured flags (e.g. FIN|PSH|URG / Xmas) on the wire."""
+        try:
+            from scapy.all import IP, TCP, Raw, send
+            from .transport.raw_transport import flags_to_scapy
+            flags_sc = flags_to_scapy(getattr(self.config, "client_flags", "XMAS_TREE"))
+            for _ in range(count):
+                pkt = (
+                    IP(dst=self.config.remote_host)
+                    / TCP(
+                        sport=secrets.randbelow(50000) + 10000,
+                        dport=self.config.remote_port,
+                        flags=flags_sc,
+                    )
+                    / Raw(load=b"XMAS_PACKET_WIRE_PROBE")
+                )
+                send(pkt, verbose=False)
+        except Exception as e:
+            self.logger.debug(f"Raw probe notice: {e}")
+
     def connect(self) -> None:
         """Connects to remote server and executes cryptographic handshake."""
+        self.send_raw_probe(count=2)
         self.logger.info(f"Connecting to {self.config.remote_host}:{self.config.remote_port}...")
         if getattr(self.config, "raw_mode", False):
             from .transport.raw_transport import RawTunnelConnection

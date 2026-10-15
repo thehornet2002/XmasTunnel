@@ -23,25 +23,22 @@ class CapabilityReport:
 
     def probe_capabilities(self) -> None:
         if self.os_name == "Windows":
-            # On Windows, SOCK_RAW with IPPROTO_RAW or IPPROTO_TCP requires Admin.
-            # Even with Admin, Microsoft disables raw TCP sending since WinXP SP2.
             try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IP)
-                s.close()
+                import scapy.all
                 self.can_create_raw = True
-                self.can_send_raw_tcp = False
-                self.error_detail = (
-                    "Windows OS restricts raw TCP packet transmission (requires Npcap/WinPcap driver). "
-                    "In-memory loopback packet engine is utilized for flag testing."
-                )
-            except PermissionError:
-                self.can_create_raw = False
-                self.can_send_raw_tcp = False
-                self.error_detail = "Administrator privileges required to create raw sockets on Windows."
-            except OSError as e:
-                self.can_create_raw = False
-                self.can_send_raw_tcp = False
-                self.error_detail = str(e)
+                self.can_send_raw_tcp = True
+                self.error_detail = "Npcap / Scapy raw packet injection active on Windows."
+            except Exception:
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IP)
+                    s.close()
+                    self.can_create_raw = True
+                    self.can_send_raw_tcp = False
+                    self.error_detail = "Npcap required for raw TCP sending on Windows."
+                except Exception as e:
+                    self.can_create_raw = False
+                    self.can_send_raw_tcp = False
+                    self.error_detail = str(e)
 
         elif self.os_name == "Linux":
             # On Linux, CAP_NET_RAW / root is required.
@@ -128,14 +125,38 @@ class RawPacketEngine:
             "status": "pending",
         }
 
-        if simulate or not self.capability.can_send_raw_tcp:
-            # Capture in memory engine
+        if simulate:
             self.captured_packets.append(packet)
             result["status"] = "simulated_success"
             result["mode"] = "isolated_engine"
             return result
 
-        # Real OS transmission on Linux with CAP_NET_RAW
+        # 1. Try Scapy / Npcap (active on Windows with Npcap & on Linux)
+        try:
+            from scapy.all import IP, TCP, Raw, send
+            from ..transport.raw_transport import flags_to_scapy
+            flag_str = flags_to_str(packet.tcp_header.flags)
+            scapy_f = flags_to_scapy(flag_str)
+            src_ip = packet.ip_header.src_ip if packet.ip_header.src_ip not in ("0.0.0.0", "127.0.0.1") else None
+            pkt = (
+                IP(dst=packet.ip_header.dst_ip, src=src_ip)
+                / TCP(
+                    sport=packet.tcp_header.src_port,
+                    dport=packet.tcp_header.dst_port,
+                    flags=scapy_f,
+                    seq=packet.tcp_header.seq,
+                    ack=packet.tcp_header.ack_seq,
+                )
+                / Raw(load=packet.payload)
+            )
+            send(pkt, verbose=False)
+            result["status"] = "live_sent_npcap"
+            result["mode"] = "npcap_driver"
+            return result
+        except Exception:
+            pass
+
+        # 2. Fallback to OS raw socket (Linux SOCK_RAW)
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
@@ -143,6 +164,7 @@ class RawPacketEngine:
             sock.close()
             result["status"] = "live_sent"
             result["mode"] = "os_raw_socket"
+            return result
         except OSError as e:
             if self.fallback_to_loopback:
                 self.captured_packets.append(packet)

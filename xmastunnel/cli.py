@@ -254,7 +254,7 @@ def cmd_client(args: argparse.Namespace) -> None:
                 flags=parsed_c_flags,
                 payload=b"CLIENT_TCP_PROBE",
             )
-            probe_res = engine.send_packet(probe_pkt, simulate=True)
+            probe_res = engine.send_packet(probe_pkt, simulate=False)
             print(f"[+] Client Probe Status: {probe_res['status']} | Checksum Valid: {probe_res['checksum_valid']}")
             if server_flags and server_flags != "NONE":
                 parsed_s_flags = parse_flags(server_flags)
