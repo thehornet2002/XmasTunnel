@@ -107,10 +107,10 @@ def cmd_server(args: argparse.Namespace) -> None:
 
         # 4. Transmission Mode
         print("\n4. Select Transmission Engine:")
-        print("   [1] Raw Xmas Packet Tunnel (Every packet has your exact custom flags in Wireshark) [Default]")
-        print("   [2] Standard TCP Stream (Kernel controls flags)")
+        print("   [1] Standard TCP Stream with AES-256-GCM (Compatible with all routers, NAT, and ISPs) [Default]")
+        print("   [2] Raw Packet Tunnel (Direct L3/L4 injection - requires public IP without NAT router)")
         m_choice = input("Select Engine [1-2, default: 1]: ").strip()
-        raw_mode = False if m_choice == "2" else True
+        raw_mode = True if m_choice == "2" else False
 
         # 5. Key
         psk = args.key or generate_server_psk()
