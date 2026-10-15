@@ -1,0 +1,12 @@
+{
+  "remote_host": "127.0.0.1",
+  "remote_port": 8443,
+  "psk": "",
+  "timeout": 15.0,
+  "retry_count": 3,
+  "retry_delay": 1.0,
+  "rate_limit_bytes_per_sec": 0,
+  "keepalive_interval": 30.0,
+  "log_file": "client.log",
+  "verbose": true
+}

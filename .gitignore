@@ -1,0 +1,8 @@
+.venv/*
+*/__pycache__/*
+xmastunnel/config/__pycache__/*
+xmastunnel/crypto/__pycache__/*
+xmastunnel/packet_engine/__pycache__/*
+xmastunnel/protocol/__pycache__/*
+xmastunnel/session/__pycache__/*
+xmastunnel/transport/__pycache__/*

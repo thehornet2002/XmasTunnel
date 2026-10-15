@@ -1,0 +1,10 @@
+{
+  "host": "0.0.0.0",
+  "port": 8443,
+  "psk": null,
+  "max_sessions": 50,
+  "idle_timeout": 300.0,
+  "rate_limit_bytes_per_sec": 0,
+  "log_file": "server.log",
+  "verbose": true
+}
