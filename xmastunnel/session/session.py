@@ -275,7 +275,6 @@ class TunnelSession:
         try:
             plaintext = self.cipher_recv.decrypt(nonce, frame.payload, associated_data=aad)
         except DecryptionFailedError as e:
-            self.sm.transition_to(ProtocolState.ERROR)
             raise SessionSecurityError(f"Decryption failed: {e}") from e
 
         self.bytes_received += len(frame.payload)

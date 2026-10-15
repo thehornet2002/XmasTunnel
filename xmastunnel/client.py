@@ -212,9 +212,12 @@ class TunnelClient:
 
         def on_stream_data(stream_id: int, chunk: bytes) -> None:
             try:
-                payload = struct.pack(">I", stream_id) + chunk
-                f = self.session.encrypt_frame(FrameType.STREAM_DATA, payload)
-                self.conn.send_frame(f)
+                max_slice = 1350 if getattr(self.config, "raw_mode", False) else len(chunk)
+                for offset in range(0, len(chunk), max_slice):
+                    sub = chunk[offset:offset + max_slice]
+                    payload = struct.pack(">I", stream_id) + sub
+                    f = self.session.encrypt_frame(FrameType.STREAM_DATA, payload)
+                    self.conn.send_frame(f)
             except Exception as e:
                 self.logger.debug(f"Failed to send STREAM_DATA for stream #{stream_id}: {e}")
 

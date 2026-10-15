@@ -88,8 +88,10 @@ class StreamChannel:
 
     def _reader_loop(self) -> None:
         try:
+            is_raw = getattr(self.conn, "_sniffer", None) is not None
+            max_read = 1350 if is_raw else 65536
             while not self.closed and self.session.is_established:
-                chunk = self.sock.recv(65536)
+                chunk = self.sock.recv(max_read)
                 if not chunk:
                     break
                 payload = struct.pack(">I", self.stream_id) + chunk
