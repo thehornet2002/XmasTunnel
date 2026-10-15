@@ -109,33 +109,36 @@ class TunnelServer:
         active_clients: Dict[Tuple[str, int], RawTunnelConnection] = {}
 
         def _on_raw_pkt(pkt):
-            if Raw in pkt and TCP in pkt and IP in pkt:
-                c_ip = pkt[IP].src
-                c_port = pkt[TCP].sport
-                key = (c_ip, c_port)
-                with self._lock:
-                    conn = active_clients.get(key)
-                    if conn is None:
-                        self.logger.info(f"[Raw Mode] Detected new raw client from {c_ip}:{c_port}")
-                        conn = RawTunnelConnection(
-                            local_ip=self.config.host,
-                            local_port=self.config.port,
-                            remote_ip=c_ip,
-                            remote_port=c_port,
-                            tx_flags=self.config.server_flags,
-                            start_sniffer=False,
-                            logger=self.logger,
-                        )
-                        active_clients[key] = conn
-                        t = threading.Thread(
-                            target=self._handle_client,
-                            args=(conn,),
-                            daemon=True,
-                            name=f"RawClient-{c_ip}:{c_port}",
-                        )
-                        t.start()
+            try:
+                if Raw in pkt and TCP in pkt and IP in pkt:
+                    c_ip = pkt[IP].src
+                    c_port = pkt[TCP].sport
+                    key = (c_ip, c_port)
+                    with self._lock:
+                        conn = active_clients.get(key)
+                        if conn is None:
+                            self.logger.info(f"[Raw Mode] Detected new raw client from {c_ip}:{c_port}")
+                            conn = RawTunnelConnection(
+                                local_ip=self.config.host,
+                                local_port=self.config.port,
+                                remote_ip=c_ip,
+                                remote_port=c_port,
+                                tx_flags=self.config.server_flags,
+                                start_sniffer=False,
+                                logger=self.logger,
+                            )
+                            active_clients[key] = conn
+                            t = threading.Thread(
+                                target=self._handle_client,
+                                args=(conn,),
+                                daemon=True,
+                                name=f"RawClient-{c_ip}:{c_port}",
+                            )
+                            t.start()
 
-                conn.feed_raw_packet(pkt[Raw].load)
+                    conn.feed_raw_packet(pkt[Raw].load)
+            except Exception as e:
+                self.logger.debug(f"Raw packet processing notice: {e}")
 
         try:
             sniffer = AsyncSniffer(

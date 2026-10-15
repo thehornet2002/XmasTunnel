@@ -246,13 +246,14 @@ def cmd_client(args: argparse.Namespace) -> None:
             parsed_c_flags = parse_flags(effective_client_flags)
             print(f"[*] Dispatching Client TCP Flag Probe [{flags_to_str(parsed_c_flags)}] to {config.remote_host}:{config.remote_port}...")
             engine = RawPacketEngine(fallback_to_loopback=True)
+            from .protocol.frame import Frame, FrameType
             probe_pkt = engine.craft_tcp_packet(
                 src_ip="127.0.0.1",
                 dst_ip=config.remote_host,
                 src_port=54321,
                 dst_port=config.remote_port,
                 flags=parsed_c_flags,
-                payload=b"CLIENT_TCP_PROBE",
+                payload=Frame(FrameType.PING, 0, 0, b"PROBE").pack(),
             )
             probe_res = engine.send_packet(probe_pkt, simulate=False)
             print(f"[+] Client Probe Status: {probe_res['status']} | Checksum Valid: {probe_res['checksum_valid']}")
